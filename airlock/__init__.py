@@ -296,8 +296,8 @@ def clear(session, pol):
         if data.pop(session, None) is None:
             if not was_unsaved:
                 return False
-        else:
-            _write_taint(data)
+        elif not _write_taint(data):
+            return False                      # still sealed on disk: say so rather than claim it is clear
     journal(pol, {"type": "taint_cleared", "session": session})
     return True
 

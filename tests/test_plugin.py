@@ -238,3 +238,21 @@ def test_a_symlink_made_later_is_resolved(tmp_path):
     (tmp_path / "link").symlink_to(target)
     shell.new_decision()                     # what rules.decide does at the start of every tool call
     assert shell.normalize("link/key", str(tmp_path)) == str((target / "key").resolve()) != before
+
+
+def test_normalize_survives_a_concurrent_cache_clear():
+    """Another thread's new_decision() can clear the process-global cache between the store and the read; a
+    KeyError there would be swallowed by post_tool_call and drop a taint. normalize must return the local value."""
+    from airlock import shell
+
+    class Clearing(dict):
+        def __setitem__(self, key, value):
+            super().__setitem__(key, value)
+            self.clear()                     # simulate a concurrent new_decision() right after the store
+
+    orig = shell._normalized
+    shell._normalized = Clearing()
+    try:
+        assert shell.normalize("~/.ssh/id_rsa", "/tmp")      # no KeyError, real path returned
+    finally:
+        shell._normalized = orig

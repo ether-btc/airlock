@@ -84,7 +84,15 @@ class Decision:
 # --- Helpers ----------------------------------------------------------------------------------------------------
 
 def under(path, root):
-    return bool(path) and bool(root) and (path == root or path.startswith(root.rstrip("/") + "/"))
+    if not path or not root:
+        return False
+    if path == root or path.startswith(root.rstrip("/") + "/"):
+        return True
+    # On a case-insensitive filesystem, ~/.SSH is ~/.ssh: fold case or the walls are bypassed by changing case.
+    if shell.CASE_INSENSITIVE_FS:
+        pl, rl = path.lower(), root.lower()
+        return pl == rl or pl.startswith(rl.rstrip("/") + "/")
+    return False
 
 
 def _texts(value):
@@ -532,9 +540,11 @@ CONTENT_KEYS = ("content", "patch", "new_string", "old_string")
 
 def _oversized(pol, tool, args, ctx, size):
     """A call too long to read in full. Padding must never turn a wall into a mere approval: a command or code that
-    long is refused, and a file tool still gets its path walls; only the file's content goes unread."""
+    long is refused, and a file tool still gets its path walls and the start of its content checked; only the
+    content past the limit goes unread (padding it after a protected-path command no longer lowers the wall)."""
     if tool in FILE_READ_TOOLS or tool in FILE_WRITE_TOOLS:
-        d = walls(pol, tool, {k: v for k, v in args.items() if k not in CONTENT_KEYS}, ctx)
+        scan = {k: (v[:MAX_CHECKED] if k in CONTENT_KEYS and isinstance(v, str) else v) for k, v in args.items()}
+        d = walls(pol, tool, scan, ctx)
         if d:
             return d
         if tool in FILE_WRITE_TOOLS and (ctx.tainted or ctx.stopped):

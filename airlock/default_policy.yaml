@@ -137,7 +137,7 @@ walls:
       reason: "each agent acts under its own profile: changing HERMES_HOME or emptying the environment would borrow another identity (reading $HERMES_HOME is fine)"
   # Deletions that would destroy a home directory, a repository or Hermes's own data.
   destructive:
-    - '\brm\s+(-[a-zA-Z]*[rR][a-zA-Z]*\s+)+["'']?(~|\$HOME|\{home\}|/)/?["'']?(\s|$)'
+    - '\brm\s+(-[a-zA-Z]*[rR][a-zA-Z]*\s+)+["'']?(~|\$HOME|\{home\}|/)/?\*?["'']?(\s|$)'
     - '\brm\s+(-[a-zA-Z]*[rR][a-zA-Z]*\s+)+[^\n;&|]*(\.hermes|\.git)/?["'']?(\s|$)'
     - '\bgit\b[^\n;&|]*\bclean\b[^\n;&|]*\s-[a-zA-Z]*[xX]'
     - '\bfind\s+["'']?(~|/|\$HOME)["'']?\s[^\n;&|]*-delete\b'

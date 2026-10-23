@@ -10,6 +10,7 @@ import re
 from dataclasses import dataclass, field
 
 from . import _yaml as yaml
+from . import shell
 
 HERE = os.path.dirname(os.path.abspath(__file__))
 DEFAULT_FILE = os.path.join(HERE, "default_policy.yaml")
@@ -57,8 +58,11 @@ class Policy:
         walls = self.raw.get("walls") or {}
         self.read_write = [p for p in (self._place(x) for x in walls.get("read_write") or []) if p]
         self.write_only = [p for p in (self._place(x) for x in walls.get("write") or []) if p]
-        self.secret_files = self._compile(walls.get("secret_files") or [], "walls.secret_files")
-        self.secret_except = self._compile(walls.get("secret_files_except") or [], "walls.secret_files_except")
+        # On a case-insensitive filesystem a secret file is reached by any casing of its name (`.ENV`, `ID_RSA`).
+        secret_flags = re.I if shell.CASE_INSENSITIVE_FS else 0
+        self.secret_files = self._compile(walls.get("secret_files") or [], "walls.secret_files", flags=secret_flags)
+        self.secret_except = self._compile(walls.get("secret_files_except") or [], "walls.secret_files_except",
+                                           flags=secret_flags)
         self.isolate_profiles = bool(walls.get("isolate_profiles", True))
         self.words = self._compile(walls.get("words") or [], "walls.words", flags=re.I)
         self.commands = []

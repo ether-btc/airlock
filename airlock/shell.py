@@ -18,7 +18,13 @@ import itertools
 import os
 import re
 import shlex
+import sys
 from dataclasses import dataclass, field
+
+# Credentials and guard paths are matched by prefix (rules.under) and by name (walls.secret_files). On a
+# case-insensitive filesystem (macOS, Windows) ``cat ~/.SSH/ID_RSA`` reads ~/.ssh/id_rsa, so the match must
+# fold case too, or every path wall is bypassed by changing the case of a letter.
+CASE_INSENSITIVE_FS = sys.platform in ("darwin", "win32")
 
 # --- Parsing ----------------------------------------------------------------------------------------------------
 
@@ -270,10 +276,18 @@ def substitute_vars(text: str) -> str:
     return re.sub(r"\$\{?([A-Za-z_]\w*)\}?", lambda m: values.get(m.group(1), m.group(0)).strip("\"'"), text)
 
 
+EMPTY_VAR = re.compile(r"\$\{?[A-Za-z_]\w*\}?")
+
+
 def variants(text: str) -> list:
-    """The text and its unmasked, folded and variable-substituted forms (deduplicated, original first)."""
+    """The text and its unmasked, folded and variable-substituted forms (deduplicated, original first).
+
+    One form collapses every still-unresolved ``$VAR``/``${VAR}`` to nothing: an unset variable expands to the
+    empty string in the shell, so ``cat ~/.a${X}ws/credentials`` reads ~/.aws/credentials and must hit the wall."""
+    subv = substitute_vars(text)
+    blanked = EMPTY_VAR.sub("", subv)
     out = []
-    for t in (text, unmask(text), fold(text), substitute_vars(text), fold(substitute_vars(text))):
+    for t in (text, unmask(text), fold(text), subv, fold(subv), blanked, fold(blanked)):
         if t and t not in out:
             out.append(t)
     return out
@@ -293,14 +307,21 @@ def new_decision():
     _normalized.clear()
 
 
+_MISSING = object()
+
+
 def normalize(path, cwd=None) -> str:
-    """Cached for the current decision only (see new_decision)."""
+    """Cached for the current decision only (see new_decision). The resolved value is returned from a local,
+    never re-read from the dict: another thread's new_decision() can clear the cache between the store and the
+    read (the cache is process-global), and a KeyError there would be swallowed by post_tool_call and drop a taint."""
     key = (str(path) if path else "", cwd or "")
-    if key not in _normalized:
+    val = _normalized.get(key, _MISSING)
+    if val is _MISSING:
         if len(_normalized) > 20000:
             _normalized.clear()
-        _normalized[key] = _normalize(*key)
-    return _normalized[key]
+        val = _normalize(*key)
+        _normalized[key] = val
+    return val
 
 
 def _normalize(path, cwd) -> str:
@@ -394,7 +415,12 @@ def _holds_protected(directory, protected):
     if not roots or TEMP_TARGET.match(directory or ""):
         return False
     d = normalize(directory, getattr(protected, "cwd", None))
-    return any(r == d or r.startswith(d.rstrip("/") + "/") for r in roots)
+    if any(r == d or r.startswith(d.rstrip("/") + "/") for r in roots):
+        return True
+    if CASE_INSENSITIVE_FS:
+        dl = d.lower()
+        return any(r.lower() == dl or r.lower().startswith(dl.rstrip("/") + "/") for r in roots)
+    return False
 
 
 def _guarded(target, protected):
