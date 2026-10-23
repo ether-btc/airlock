@@ -3,3 +3,4 @@ __pycache__/
 *.pyc
 .pytest_cache/
 docs/images/src/session/frames.json
+.DS_Store
