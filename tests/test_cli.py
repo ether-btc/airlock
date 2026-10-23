@@ -18,13 +18,21 @@ def run(*argv):
 
 def test_check_clean_and_tainted(plugin, capsys):
     run("check", "git status")
-    assert capsys.readouterr().out.startswith("allow")
+    assert capsys.readouterr().out.strip() == "verdict  : allow"
     run("check", "git push")
-    assert "approve — publish" in capsys.readouterr().out
+    out = capsys.readouterr().out
+    assert "verdict  : approve" in out and "category : publish" in out and "rule     : egress.git-push" in out
     run("check", "--tainted", "--args", '{"action": "add", "content": "x"}', "memory")
-    assert "approve — persistence" in capsys.readouterr().out
+    assert "category : persistence" in capsys.readouterr().out
     run("check", "curl -s https://example.com/x")
-    assert "taints the session" in capsys.readouterr().out
+    assert "taints   : https://example.com/x" in capsys.readouterr().out
+
+
+def test_demo_runs_nothing_and_seals(plugin, capsys):
+    run("demo")
+    out = capsys.readouterr().out
+    assert out.count("→     BLOCK") == 2 and out.count("→     ASKS YOU") == 2 and "now sealed" in out
+    assert not (plugin.data / "journal.jsonl").exists() and not (plugin.data / "taint.json").exists()
 
 
 def test_stop_resume_and_status(plugin, capsys):

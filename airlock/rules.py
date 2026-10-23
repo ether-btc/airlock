@@ -42,6 +42,15 @@ BUILD_FILES = {"Makefile", "makefile", "GNUmakefile", "package.json", "setup.py"
                "tox.ini", "noxfile.py", "conftest.py", "deno.json", "go.mod", ".npmrc", "requirements.txt"}
 
 
+TOOL_REASONS = {
+    "message": "sends a message to someone other than the owner",
+    "persistence": "writes what the agent remembers or runs later",
+    "delegation": "hands work to another agent",
+    "browser_input": "acts in the browser (click, type, run code, saved logins)",
+    "install": "installs a plugin, skill or connector",
+}
+
+
 @dataclass
 class Context:
     """What the plugin knows around a tool call."""
@@ -295,7 +304,7 @@ def categories(pol, tool, args, ctx):
     cat = pol.tool_categories.get(tool)
     if cat and not _is_read_action(pol, tool, args):
         if not (tool == "send_message" and _message_to_owner(args, ctx)):
-            found.append((cat, f"{tool} ({cat.replace('_', ' ')})", f"tool_categories.{tool}"))
+            found.append((cat, f"{TOOL_REASONS.get(cat, cat.replace('_', ' '))}", f"tool_categories.{tool}"))
     if tool == "browser_console" and args.get("expression"):
         found.append(("browser_input", "browser_console runs code in the page", "tool.browser_console"))
     if tool == "discord" and not _is_read_action(pol, tool, args):
@@ -351,6 +360,10 @@ def categories(pol, tool, args, ctx):
         if hit:
             found.append(("written_script", f"runs {hit}, a file written in this session after reading untrusted "
                                             "content", "written_then_run"))
+    for u in tool_urls(tool, args):
+        if exfil_url(u, pol):
+            found.append(("exfil_url", f"URL that could carry data out ({u[:60]})", "exfil_url"))
+            break
     if text and tool != "execute_code":
         views = "\n".join(shell.command_views(text))
         if NET_COMMAND.search(views) and re.search(r"\$\(|`", text) and URL_OR_HOST_SUBST.search(text):
@@ -359,9 +372,10 @@ def categories(pol, tool, args, ctx):
         if ctx.tainted:
             hosts = [h for h in NET_HOSTS.findall(views)] + URL.findall(text)
             untrusted = [h for h in hosts if not _domain_trusted(h if "://" in h else "https://" + h, pol)]
-            if NET_COMMAND.search(views) and untrusted:
-                found.append(("exfil_url", f"network call from the shell to {untrusted[0][:60]} after reading "
-                                           "untrusted content (its address, headers or timing can carry data)",
+            if NET_COMMAND.search(views) and untrusted and not any(f[0] == "exfil_url" for f in found):
+                host = urlparse(untrusted[0]).hostname if "://" in untrusted[0] else untrusted[0]
+                found.append(("exfil_url", f"network call to {host} after untrusted content (the address can carry "
+                                           "data)",
                               "shell_network_tainted"))
     if text and ctx.tainted and ctx.written:
         builders = [v for v in (shell.verb(s) for s in shell.segments(text)) if v in BUILD_TOOLS]
@@ -369,10 +383,6 @@ def categories(pol, tool, args, ctx):
         if builders and configs:
             found.append(("written_script", f"{builders[0]} reads {pretty(configs[0], ctx)}, written in this "
                                             "session after reading untrusted content", "written_build_file"))
-    for u in tool_urls(tool, args):
-        if exfil_url(u, pol):
-            found.append(("exfil_url", f"URL that could carry data out ({u[:80]})", "exfil_url"))
-            break
     if ctx.origin and ctx.origin != "core" and not admitted(pol, tool, ctx.origin):
         found.append(("unadmitted_tool", f"{tool} comes from {ctx.origin.replace(':', ' ')}, which airlock cannot "
                                          "read and nobody admitted", "tools.unadmitted"))
@@ -381,8 +391,7 @@ def categories(pol, tool, args, ctx):
 
 def _describe(rid, rx, text):
     m = rx.search(text)
-    snippet = re.sub(r"\s+", " ", m.group(0)).strip()[:60] if m else rid
-    return f"{snippet} ({rid})"
+    return re.sub(r"\s+", " ", m.group(0)).strip()[:60] if m else rid
 
 
 def admitted(pol, tool, origin):

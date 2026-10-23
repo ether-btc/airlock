@@ -12,5 +12,5 @@ First public version.
   forbidden words, commands that disable the guard or change identity, destructive deletions.
 - Shell reading: quoting, heredocs, `sh -c`, `eval`, `find -exec`, inline code, decoding piped to interpreters,
   computed program names, aliases, wildcard program names, files written then executed.
-- `hermes airlock` (status, check, log, stop, resume, clear, policy) and `/airlock`.
+- `hermes airlock` (status, check, demo, log, stop, resume, clear, policy) and `/airlock`.
 - Observe mode, journal, stop switch, exact-call approval keys, fail-closed on internal errors.

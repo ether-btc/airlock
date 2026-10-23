@@ -1,5 +1,13 @@
 # Demo
 
+## In your install
+
+```bash
+hermes airlock demo
+```
+
+Plays the attack below against the policy in force on your machine. Nothing is executed, journaled or tainted.
+
 ## Replay (no model, ten seconds)
 
 ```bash
