@@ -1,0 +1,10 @@
+# Nothing leaves without a human, even in a clean conversation, and unknown tools are refused outright.
+actions:
+  persistence: {clean: approve, tainted: approve}
+  delegation: {clean: approve, tainted: approve}
+  browser_input: {clean: approve, tainted: approve}
+  exfil_url: {clean: approve, tainted: approve}
+  written_script: {clean: approve, tainted: approve}
+  unadmitted_tool: {clean: block, tainted: block}
+taint:
+  untrusted_paths: ["{home}/Downloads", "/tmp"]

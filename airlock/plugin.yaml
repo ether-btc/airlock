@@ -1,0 +1,30 @@
+name: airlock
+version: 0.1.0
+manifest_version: 2
+api_version: 1
+label: airlock
+description: >-
+  Guardrails for tool calls. Once a conversation reads untrusted content (a web page, an MCP tool's output, a
+  customer's message), airlock seals it: messages, uploads, pushes, posts and other outbound actions wait for the
+  owner's approval. Walls that hold in every session (credentials, the guard's own files, other profiles), a reading
+  of shell commands that sees through the usual disguises, and a refusal of plugin and MCP tools nobody admitted.
+  Local only: no network, no LLM call.
+author: Otsoa Dubief
+license: Apache-2.0
+homepage: https://github.com/otsoa-dubief/airlock
+tags: [security, guardrails, prompt-injection, approvals]
+requires_hermes: ">=0.21.5"
+provides_tools: []
+provides_hooks:
+  - pre_tool_call
+  - post_tool_call
+  - pre_llm_call
+  - subagent_start
+  - on_session_reset
+  - post_approval_response
+config_schema:
+  policy_file:
+    type: str
+    default: ""
+    description: "Your policy file, merged on top of the default (default: <HERMES_HOME>/airlock.yaml)"
+    required: false

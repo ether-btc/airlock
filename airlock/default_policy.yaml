@@ -1,0 +1,279 @@
+# airlock default policy.
+#
+# Your own policy file (see docs/policy.md) is merged on top of this one: mappings merge key by key, lists are
+# appended. To switch off a built-in detector, list its id under `disable:`.
+#
+# Placeholders: {home} your home directory, {hermes_home} the active profile's HERMES_HOME, {hermes_root} the
+# Hermes root (~/.hermes), {plugin_dir} this plugin's directory, {policy_file} your policy file, {data_dir} airlock's
+# data directory (journal, taint state, kill switch).
+
+# enforce: block and ask as configured. observe: never interfere, only write what would have happened to the journal.
+mode: enforce
+
+# Profiles airlock guards. Empty = every profile.
+profiles: []
+
+# What happens to each category of action, in a clean session and in a session that has read untrusted content.
+#   allow    nothing happens
+#   log      allowed, written to the journal
+#   approve  Hermes asks a human (CLI prompt or gateway buttons); fails closed where nobody can answer (cron)
+#   block    refused; the agent gets the reason and what to do instead
+actions:
+  message:          {clean: approve, tainted: approve}   # messages to anyone but the owner's own channels
+  network_write:    {clean: approve, tainted: approve}   # POST/PUT/DELETE, uploads, raw sockets, SMTP
+  publish:          {clean: approve, tainted: approve}   # git push, PRs and issues, package publishing, deploys
+  remote:           {clean: approve, tainted: approve}   # ssh, scp, rsync to another machine
+  install:          {clean: approve, tainted: approve}   # installing plugins, skills or connectors from a catalog
+  persistence:      {clean: log,     tainted: approve}   # memory, skills, scheduled jobs, crontab, launch agents
+  delegation:       {clean: allow,   tainted: approve}   # handing a task to another agent or profile
+  browser_input:    {clean: allow,   tainted: approve}   # clicking, typing, running code in the browser, saved logins
+  exfil_url:        {clean: allow,   tainted: approve}   # a URL whose path or query could carry data out
+  detach:           {clean: approve, tainted: approve}   # a process that leaves the session (setsid, nohup &, tmux -d)
+  written_script:   {clean: allow,   tainted: approve}   # running a file this session wrote
+  unadmitted_tool:  {clean: approve, tainted: approve}   # a plugin or MCP tool nobody admitted (see `tools:`)
+  bypass:           {clean: block,   tainted: block}     # a command that computes or hides what it runs
+
+# Walls hold in every session, tainted or not, and nothing lifts them except editing this policy by hand.
+walls:
+  # Never read nor written by the agent, by any tool or command (credentials, keys, browser profiles).
+  read_write:
+    - "{home}/.ssh"
+    - "{home}/.gnupg"
+    - "{home}/.aws"
+    - "{home}/.azure"
+    - "{home}/.config/gcloud"
+    - "{home}/.kube"
+    - "{home}/.docker/config.json"
+    - "{home}/.netrc"
+    - "{home}/.git-credentials"
+    - "{home}/.config/gh"
+    - "{home}/.config/hub"
+    - "{home}/.npmrc"
+    - "{home}/.pypirc"
+    - "{home}/.cargo/credentials.toml"
+    - "{home}/.password-store"
+    - "{home}/.local/share/keyrings"
+    - "{home}/Library/Keychains"
+    - "{home}/Library/Cookies"
+    - "{home}/Library/Application Support/Google/Chrome"
+    - "{home}/Library/Application Support/Firefox"
+    - "{home}/Library/Safari"
+    - "{home}/.config/google-chrome"
+    - "{home}/.mozilla"
+    - "{hermes_home}/auth.json"
+    - "{hermes_home}/.env"
+    - "{hermes_root}/auth.json"
+    - "{hermes_root}/.env"
+    - "{data_dir}"
+  # Readable, never written: the guard itself, Hermes's own configuration and code, and the files a shell or the
+  # OS runs at startup (writing them would plant a program that runs later, outside any guard).
+  write:
+    - "{plugin_dir}"
+    - "{policy_file}"
+    - "{hermes_home}/config.yaml"
+    - "{hermes_home}/plugins"
+    - "{hermes_home}/hooks"
+    - "{hermes_root}/config.yaml"
+    - "{hermes_root}/plugins"
+    - "{hermes_root}/hooks"
+    - "{hermes_root}/hermes-agent"
+    - "{home}/.bashrc"
+    - "{home}/.bash_profile"
+    - "{home}/.profile"
+    - "{home}/.zshrc"
+    - "{home}/.zshenv"
+    - "{home}/.zprofile"
+    - "{home}/.zlogin"
+    - "{home}/.config/fish/config.fish"
+    - "{home}/Library/LaunchAgents"
+    - "{home}/.config/systemd/user"
+    - "{home}/.config/autostart"
+    - "/etc"
+    - "/Library/LaunchDaemons"
+    - "/Library/LaunchAgents"
+  # File names that hold secrets wherever they are (regular expressions on the full path).
+  secret_files:
+    - '(^|/)\.env(\.[^/]*)?$'
+    - '(^|/)[^/]*credentials[^/]*\.json$'
+    - '(^|/)([^/]*[_.-])?(secrets?|tokens?)\.(json|ya?ml|txt|env|ini|toml)$'
+    - '(^|/)[^/]*(access|auth|api|bearer|refresh|oauth|session)[_-]?(token|key|secret)s?[^/]*\.(json|ya?ml|txt|env|ini|toml)$'
+    - '(^|/)(id_rsa|id_ed25519|id_ecdsa|id_dsa)(\.pub)?$'
+    - '(^|/)[^/]+\.(pem|p12|pfx|key|keystore|jks)$'
+    - '(^|/)\.(htpasswd|netrc|git-credentials|pgpass|my\.cnf|npmrc|pypirc)$'
+    - '/secrets?(/|$)'
+  # Templates and examples are not secrets.
+  secret_files_except:
+    - '\.(example|sample|template|tmpl|dist|defaults?)$'
+    - '(^|/)(design[_-]?)?tokens\.(json|ya?ml)$'
+  # Other Hermes profiles on this machine stay out of reach of each other.
+  isolate_profiles: true
+  # Words or patterns the agent must never use in a command, a file it writes or a message (regular expressions,
+  # case-insensitive). Typical use: another client's or another company's name. Empty by default.
+  words: []
+  # Commands that would switch the guard off or change who the agent is.
+  commands:
+    - id: disable-airlock
+      pattern: '\bhermes\b[^\n;&|]*\bplugins?\b[^\n;&|]*\b(disable|remove|rm|uninstall|update)\b[^\n;&|]*\bairlock\b'
+      reason: "switching airlock off or changing it is the owner's job, outside the agent"
+    - id: airlock-cli
+      pattern: '\bhermes\b[^\n;&|]*\bairlock\s+(resume|clear)\b'
+      reason: "lifting the stop switch or a taint is the owner's decision, made outside the agent"
+    - id: hermes-config
+      pattern: '\bhermes\b[^\n;&|]*\bconfig\b[^\n;&|]*\b(set|edit|unset|reset|migrate)\b'
+      reason: "Hermes configuration is changed by the owner, outside the agent"
+    - id: yolo
+      pattern: '--yolo\b|\bHERMES_YOLO\w*\s*=|\bapprovals?[._]mode\b'
+      reason: "approvals cannot be turned off from inside a session"
+    - id: identity
+      pattern: '\bHERMES_HOME\s*=|\bexport\s+HERMES_HOME\b|\benv\b(\s+-\S+)*\s+(-[a-zA-Z]*[iu]\b|--ignore-environment|--unset)|\bunset\s+HERMES_HOME\b|\bos\.environ\s*\[\s*["'']HERMES_HOME["'']\s*\]\s*=|\bputenv\s*\(\s*["'']HERMES_HOME'
+      reason: "each agent acts under its own profile: changing HERMES_HOME or emptying the environment would borrow another identity (reading $HERMES_HOME is fine)"
+  # Deletions that would destroy a home directory, a repository or Hermes's own data.
+  destructive:
+    - '\brm\s+(-[a-zA-Z]*[rR][a-zA-Z]*\s+)+["'']?(~|\$HOME|\{home\}|/)/?["'']?(\s|$)'
+    - '\brm\s+(-[a-zA-Z]*[rR][a-zA-Z]*\s+)+[^\n;&|]*(\.hermes|\.git)/?["'']?(\s|$)'
+    - '\bgit\b[^\n;&|]*\bclean\b[^\n;&|]*\s-[a-zA-Z]*[xX]'
+    - '\bfind\s+["'']?(~|/|\$HOME)["'']?\s[^\n;&|]*-delete\b'
+    - '\bmkfs(\.\w+)?\b|\bdd\b[^\n;&|]*\bof=/dev/(sd|disk|nvme|hd)'
+
+# Built-in detectors of outbound actions, by category. Add your own (same shape) in your policy; a pattern is a
+# regular expression matched against what the command runs (each simple command's words, a quoted text with spaces
+# shown as "…", the inside of sh -c, eval, find -exec and heredocs), inline code, and their unmasked forms (quotes and
+# string concatenations removed, so g'i't p"u"sh still reads as git push). `match: raw` matches the raw text instead
+# (needed for shell syntax such as a trailing &).
+egress:
+  # --- publish
+  - {id: git-push, category: publish, pattern: '\bgit\b[^\n;&|]*\bpush\b'}
+  - {id: gh-write, category: publish, pattern: '\b(gh|glab)\s+(pr|mr)\s+(create|merge|comment|review|edit|close|reopen|ready)\b|\b(gh|glab)\s+issue\s+(create|comment|edit|close|reopen|delete|transfer)\b|\b(gh|glab)\s+release\s+(create|upload|edit|delete)\b|\b(gh|glab)\s+repo\s+(create|delete|edit|fork|rename|archive)\b|\bgh\s+(gist\s+(create|edit)|secret\s+set|variable\s+set|workflow\s+run|run\s+rerun)\b'}
+  - {id: gh-api-write, category: publish, pattern: '\b(gh|glab)\s+api\b[^\n;&|]*(\s(-X|--method)\s*["'']?(POST|PUT|PATCH|DELETE)|\s(-f|-F|--field|--raw-field|--input)\s)'}
+  - {id: package-publish, category: publish, pattern: '\b(npm|pnpm|yarn|bun)\s+publish\b|\btwine\s+upload\b|\b(uv|poetry|hatch|flit)\s+publish\b|\bcargo\s+publish\b|\bgem\s+push\b|\bdocker\s+(push|buildx\b[^\n;&|]*--push)\b|\bpodman\s+push\b|\bhelm\s+push\b'}
+  - {id: deploy, category: publish, pattern: '\bvercel\b[^\n;&|]*(\s--prod\b|\sdeploy\b|\spromote\b|\srollback\b|\salias\b|\srm\b|\sremove\b|\senv\s+(add|rm)\b)|\bnetlify\s+deploy\b|\bfly(ctl)?\s+deploy\b|\bfirebase\s+deploy\b|\bwrangler\s+(deploy|publish|secret)\b|\bkubectl\s+(apply|create|delete|replace|patch|scale|rollout|edit|set)\b|\bhelm\s+(install|upgrade|uninstall|rollback)\b|\bterraform\s+(apply|destroy|import)\b|\bpulumi\s+(up|destroy)\b|\bheroku\s+(create|destroy|config:set|releases:rollback)\b|\bgit\s+push\s+heroku\b'}
+  - {id: cloud-write, category: publish, pattern: '\baws\b[^\n;&|]*\s(s3\s+(cp|mv|sync|rm|rb|mb)|put-\w+|create-\w+|delete-\w+|update-\w+|send-\w+|publish|invoke|terminate-\w+|run-instances)\b|\b(gcloud|gsutil)\b[^\n;&|]*\s(deploy|create|delete|update|cp|mv|rm|rsync|publish|set-iam-policy)\b|\baz\b[^\n;&|]*\s(create|delete|update|set|upload|deploy)\b'}
+  # --- network writes
+  - {id: curl-write, category: network_write, pattern: '\bcurl\b[^\n;&|]*\s(-d|--data[\w-]*|-F|--form[\w-]*|-T|--upload-file|--json|(-X|--request)\s*["'']?(POST|PUT|PATCH|DELETE))(\s|=|$)'}
+  - {id: wget-write, category: network_write, pattern: '\bwget\b[^\n;&|]*\s--(post-data|post-file|body-data|body-file|method[= ]["'']?(POST|PUT|PATCH|DELETE))'}
+  - {id: httpie-write, category: network_write, pattern: '\b(http|https|xh|xhs)\s+(-\S+\s+)*(POST|PUT|PATCH|DELETE)\s|\b(http|https|xh|xhs)\s+(-\S+\s+)*\S+\s+[\w.-]+(:=|=)'}
+  - {id: raw-socket, category: network_write, pattern: '\b(nc|ncat|netcat|socat|telnet)\s+[^\n;&|]*\S+\s+\d+|/dev/(tcp|udp)/'}
+  - {id: serve-files, category: network_write, pattern: '\bpython[\d.]*\s+-m\s+(http\.server|SimpleHTTPServer)\b|\b(ngrok|cloudflared|localtunnel|lt)\b[^\n;&|]*\s(http|tunnel|--port)\b|\bserveo\.net\b'}
+  - {id: file-transfer, category: network_write, pattern: '\b(ftp|lftp|sftp|tftp|smbclient)\b|\brclone\s+(copy|sync|move|copyto|moveto)\b'}
+  - {id: python-http-write, category: network_write, pattern: '\b(requests|httpx|session)\.(post|put|patch|delete)\s*\(|\b(requests|httpx)\.request\s*\(\s*["''](POST|PUT|PATCH|DELETE)|\burlopen\s*\([^)]*\bdata\s*=|\bRequest\s*\([^)]*\b(data|method)\s*=|\baiohttp\b[^\n]*\.(post|put|patch|delete)\s*\('}
+  - {id: python-mail-socket, category: network_write, pattern: '\bsmtplib\b|\bftplib\b|\bsocket\.(socket|create_connection)\b'}
+  - {id: js-http-write, category: network_write, pattern: '\bfetch\s*\([^)]*method\s*:\s*["''](POST|PUT|PATCH|DELETE)|\baxios\.(post|put|patch|delete)\s*\(|\bnavigator\.sendBeacon\b'}
+  # --- remote machines
+  - {id: ssh, category: remote, pattern: '(^|[\s;&|(])ssh\s+(?!-V\b)(-\S+\s+)*[\w.@-]+'}
+  - {id: remote-copy, category: remote, pattern: '\b(scp|rsync)\b[^\n;&|]*\s[\w.-]+@?[\w.-]*:[^\s]*|\brsync\b[^\n;&|]*::'}
+  # --- messages
+  - {id: mail-cli, category: message, pattern: '(^|[\s;&|(])(mail|mailx|sendmail|msmtp|mutt|neomutt|swaks|ssmtp)\s'}
+  - {id: chat-webhooks, category: message, pattern: 'hooks\.slack\.com/|discord(app)?\.com/api/webhooks/|api\.telegram\.org/bot[^/\s]+/send|graph\.facebook\.com/[^\s]*/messages|api\.twilio\.com/|outlook\.office(365)?\.com/webhook'}
+  - {id: macos-send, category: message, pattern: '\bosascript\b[^\n]*(application\s+"?(Messages|Mail)"?|\bsend\b)'}
+  # --- persistence
+  - {id: crontab, category: persistence, pattern: '\bcrontab\b(?![^\n;&|]*\s-l\b)'}
+  - {id: launch-agents, category: persistence, pattern: '\blaunchctl\s+(load|bootstrap|enable|submit|kickstart)\b|\bsystemctl\s+(--user\s+)?(enable|link|edit|set-property)\b|\bschtasks\s+/create\b'}
+  - {id: hermes-cron, category: persistence, pattern: '\bhermes\b[^\n;&|]*\bcron\s+(create|add|edit|update|resume|run)\b'}
+  # --- delegation (a new agent session would start without this session's taint)
+  - {id: hermes-chat, category: delegation, pattern: '\bhermes\b[^\n;&|]*\s(chat|-z|run)\b'}
+  # --- detached processes
+  - {id: detach, category: detach, match: raw, pattern: '\bsetsid\b|\bdisown\b|\bdaemonize\b|\bnohup\b[^\n;|]*&\s*($|;)|\btmux\s+new(-session)?\b[^\n;&|]*\s-d\b|\bscreen\s+-[a-zA-Z]*d[a-zA-Z]*m|\bstart_new_session\s*=\s*True|\bos\.(fork|forkpty|setsid)\s*\(|\bpty\.(fork|spawn)\b'}
+
+# Files that hold what the agent remembers or runs later. Writing them with a file tool or a command counts as
+# `persistence`, like the memory, skill and cron tools do.
+persistence_paths:
+  - "{hermes_home}/memories"
+  - "{hermes_home}/skills"
+  - "{hermes_home}/cron"
+  - "{hermes_home}/SOUL.md"
+  - "{hermes_root}/skills"
+
+# Tools Hermes provides, by category. Only tools airlock knows are listed; a tool from a plugin or an MCP server
+# that is not admitted under `tools:` falls in `unadmitted_tool`.
+tool_categories:
+  send_message: message
+  yb_send_dm: message
+  yb_send_sticker: message
+  a2a_call: message
+  a2a_orchestrate: message
+  feishu_drive_add_comment: message
+  feishu_drive_reply_comment: message
+  message_agent: delegation
+  delegate_task: delegation
+  kanban_create: delegation
+  memory: persistence
+  skill_manage: persistence
+  cronjob_manage: persistence
+  manage_catalog: install
+  manage_connections: install
+  browser_click: browser_input
+  browser_type: browser_input
+  browser_press: browser_input
+  browser_dialog: browser_input
+  browser_exec: browser_input
+  browser_cdp: browser_input
+  browser_vault: browser_input
+  computer_use: browser_input
+
+# Actions of a tool that only read, so they never count as an outbound action (tool: [actions]).
+read_actions:
+  memory: [read, list, search, view]
+  cronjob_manage: [list, show, status]
+  manage_catalog: [search, list]
+  manage_connections: [list, status]
+  computer_use: [screenshot, list_apps, list_windows, get_window_state, accessibility_tree, wait]
+  discord: [search_members, fetch_messages, list_channels, list_threads, get_member, list_roles, fetch_message]
+  send_message: [list]
+
+# Tools that read content from outside this machine. Their output taints the session.
+taint:
+  enabled: true
+  source_tools:
+    - web_search
+    - web_extract
+    - x_search
+    - browser_navigate
+    - browser_snapshot
+    - browser_vision
+    - browser_get_images
+    - browser_console
+    - browser_exec
+    - browser_cdp
+    - video_analyze
+    - feishu_doc_read
+    - feishu_drive_list_comments
+    - feishu_drive_list_comment_replies
+    - a2a_call
+    - a2a_history
+    - discord
+  # Commands and code that read from the network.
+  source_patterns:
+    - '\b(curl|wget|yt-dlp|youtube-dl|lynx|w3m|links|aria2c|http|https|xh|xhs)\b[^\n;&|]*https?://'
+    - '\bgit\s+(clone|pull|fetch)\b|\b(gh|glab)\s+(pr|issue|release|repo|api|run|gist)\s+(view|list|diff|checkout|clone|download)\b|\bgh\s+api\b'
+    - '\b(urlopen|urlretrieve|requests\.(get|head|Session|request)|httpx\.(get|Client|AsyncClient|stream|request)|aiohttp|webbrowser|playwright|selenium|fetch\s*\()'
+  # Domains whose content is trusted (no taint). Subdomains included.
+  trusted_domains: []
+  # Files under these paths are untrusted (read_file taints).
+  untrusted_paths:
+    - "{home}/Downloads"
+  # Sessions on these platforms start tainted: their messages come from people other than the owner
+  # (e.g. [email, whatsapp] for an agent that answers customers).
+  platforms: []
+  # How long a session stays tainted after its last untrusted read, if it is never reset.
+  ttl_hours: 72
+
+# Tools from plugins and MCP servers. airlock only reads the tools it knows; any other tool is `unadmitted_tool`
+# until you admit it here, after reading what it does.
+tools:
+  admitted_plugins: []            # plugin names, e.g. [hindsight]
+  admitted_mcp_servers: []        # MCP server names as in config.yaml mcp_servers
+  admitted_tools: []              # single tool names
+  trusted_output: []              # admitted plugins, servers or tools whose output does not taint the session
+
+# Channels that belong to the owner: messages there are not outbound. "auto" reads the home channels of the
+# profile's config.yaml; add "platform:chat_id" entries to extend it.
+owner_channels: [auto]
+
+journal:
+  enabled: true
+  # full: tool arguments (truncated) are written to the journal. none: only tool names and reasons.
+  args: full
+  max_mb: 20
+
+# Ids of built-in detectors or command walls to switch off.
+disable: []

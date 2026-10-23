@@ -1,0 +1,120 @@
+# Policy reference
+
+airlock reads [default_policy.yaml](../airlock/default_policy.yaml), then your file, by default `<HERMES_HOME>/airlock.yaml`
+(set another path with `plugins.entries.airlock.settings.policy_file` in `config.yaml`). Your file is merged on top:
+mappings merge key by key, lists are appended. The file is reloaded when it changes; no restart needed.
+
+A file that does not parse, or a pattern that does not compile, is reported by `hermes airlock policy` and in
+Hermes's log. A file that does not parse is ignored as a whole: the default policy stays in force.
+
+Placeholders in paths: `{home}`, `{hermes_home}` (the active profile), `{hermes_root}` (`~/.hermes`), `{plugin_dir}`,
+`{policy_file}`, `{data_dir}` (airlock's journal, taint state and stop switch).
+
+## `mode`
+
+`enforce` (default) or `observe`. In observe mode airlock never blocks nor asks; it writes `would_block`,
+`would_approve` and `would_log` entries to the journal. Use it to see what airlock would do on your real work before
+you turn it on.
+
+## `profiles`
+
+Profiles airlock guards. Empty (default) means every profile where the plugin is enabled.
+
+## `actions`
+
+For each category, the level in a clean conversation and in a tainted one: `allow`, `log` (allowed and written to the
+journal), `approve` (Hermes asks a human; fails closed where nobody can answer) or `block`.
+
+```yaml
+actions:
+  publish: {clean: log, tainted: approve}
+  unadmitted_tool: {clean: block, tainted: block}
+```
+
+Categories: `message`, `network_write`, `publish`, `remote`, `install`, `persistence`, `delegation`,
+`browser_input`, `exfil_url`, `detach`, `written_script`, `unadmitted_tool`, `bypass`. Walls are not a category:
+they always block.
+
+## `walls`
+
+| Key | Meaning |
+|---|---|
+| `read_write` | Paths the agent may neither read nor write, with any tool or command |
+| `write` | Paths the agent may read but never write (the guard, Hermes's config, startup files) |
+| `secret_files` | Regular expressions on full paths: files that hold secrets wherever they are |
+| `isolate_profiles` | `true` (default): another Hermes profile's directory is out of reach |
+| `words` | Case-insensitive regular expressions that must never appear in any tool call (a command, a file being written, a message) |
+| `commands` | `{id, pattern, reason}`: commands refused outright (switching the guard or approvals off, changing `HERMES_HOME`) |
+| `destructive` | Patterns of catastrophic deletions |
+
+Paths are checked after resolving `~`, variables, symlinks and `..`, in the arguments of file tools, in commands and
+code (including paths built in pieces: `os.path.join('~', '.ss' + 'h')`, `Path.home() / '.aws'`), and through
+wildcards (`~/.ss*/id_*`).
+
+## `egress`
+
+Detectors of outbound actions: `{id, category, pattern}`, plus `match: raw` to match the raw command text instead of
+what it runs. Patterns are matched against each simple command's words (a quoted text containing spaces, such as a
+commit message, shows as `…`), the inside of `sh -c`, `eval`, `find -exec` and heredocs, inline code, literal argument
+lists in Python (`["git", "push"]`), and the unmasked forms of all of these (quotes and string concatenations
+removed).
+
+Add your own:
+
+```yaml
+egress:
+  - {id: stripe-api, category: network_write, pattern: '\bstripe\b[^\n;&|]*\s(charges|refunds|payouts)\s+create\b'}
+```
+
+## `persistence_paths`
+
+Files that hold what the agent remembers or runs later (`memories/`, `skills/`, `cron/`, `SOUL.md`). Writing them
+with a file tool or a command counts as `persistence`, like the `memory`, `skill_manage` and `cronjob_manage` tools.
+Reading them is free.
+
+## `tool_categories` and `read_actions`
+
+Hermes tools by category (`send_message: message`, `memory: persistence`...), and the actions of a tool that only read
+(`memory: [read, list]`). A tool listed here with a read action is not outbound.
+
+## `taint`
+
+| Key | Meaning |
+|---|---|
+| `enabled` | `true` by default |
+| `source_tools` | Tools whose output taints the conversation (web, browser, X search, A2A, Discord...) |
+| `source_patterns` | Commands and code that read from the network (`curl https://...`, `git clone`, `requests.get`...) |
+| `trusted_domains` | Reading only from these domains (and their subdomains) does not taint |
+| `untrusted_paths` | Reading files under these paths taints (`~/Downloads` by default) |
+| `platforms` | Conversations on these platforms are tainted from their first message (customer-facing agents) |
+| `ttl_hours` | A taint expires after this long without new untrusted reads (72 by default) |
+
+A conversation's taint ends when the conversation is reset (`/new`), when it expires, or when the owner clears it
+(`/airlock clear`, `hermes airlock clear <session>`). Taint is saved to disk: a restart does not clear it.
+
+## `tools`
+
+| Key | Meaning |
+|---|---|
+| `admitted_plugins` | Plugins whose tools you have read and accept |
+| `admitted_mcp_servers` | MCP servers (names as in `mcp_servers`) whose tools you accept |
+| `admitted_tools` | Single tools you accept |
+| `trusted_output` | Admitted plugins, servers or tools whose output does not taint the conversation |
+
+## `owner_channels`
+
+Chats that belong to the owner: a `send_message` there is not outbound. `auto` (default) reads the home channels in
+the profile's `config.yaml`; add `"platform:chat_id"` entries if needed.
+
+## `journal`
+
+`enabled` (default `true`), `args` (`full` writes the tool's arguments, truncated; `none` writes only names and
+reasons), `max_mb` (the journal is rotated once past this size).
+
+## `disable`
+
+Ids of built-in `egress` detectors or `walls.commands` to switch off:
+
+```yaml
+disable: [hermes-chat, detach]
+```

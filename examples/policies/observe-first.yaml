@@ -1,0 +1,4 @@
+# Try airlock on your real work without it ever getting in the way.
+# After a few days, read `hermes airlock log --type would_approve` and `--type would_block`, adjust, then remove
+# this line (or set mode: enforce).
+mode: observe

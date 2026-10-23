@@ -1,0 +1,9 @@
+# A coding agent on your own repositories: pushes and PRs are routine until it reads something from outside.
+actions:
+  publish: {clean: log, tainted: approve}
+  detach: {clean: log, tainted: approve}     # dev servers in the background
+tools:
+  admitted_mcp_servers: [github]
+  # GitHub content (issues, PR comments) is written by other people: keep it tainting.
+taint:
+  trusted_domains: [docs.python.org, developer.mozilla.org]

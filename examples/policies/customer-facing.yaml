@@ -1,0 +1,11 @@
+# An agent that answers customers by email or WhatsApp: every message it receives is untrusted from the start.
+taint:
+  platforms: [email, whatsapp, whatsapp_cloud]
+  trusted_domains: [yourcompany.example]
+# Replies go out through send_message to the customer's chat: they need approval. If you want the agent to answer
+# on its own, make it log instead, and keep the walls and the other categories sealed:
+# actions:
+#   message: {clean: log, tainted: log}
+walls:
+  # Another client's name must never appear in what this agent writes or sends.
+  words: ['other\s*client\s*name']
