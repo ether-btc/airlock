@@ -1,3 +1,5 @@
+# Copyright 2026 Otsoa Dubief
+# SPDX-License-Identifier: Apache-2.0
 """Loading the policy: the shipped default, merged with the owner's file, placeholders expanded, patterns compiled.
 
 A broken user policy never weakens the guard: airlock reports the error and keeps the default policy.

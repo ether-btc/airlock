@@ -1,3 +1,5 @@
+# Copyright 2026 Otsoa Dubief
+# SPDX-License-Identifier: Apache-2.0
 """airlock — guardrails for Hermes Agent.
 
 Once a conversation has read something from outside (a web page, an email, an MCP tool's output), airlock seals it:

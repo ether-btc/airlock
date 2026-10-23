@@ -1,3 +1,5 @@
+# Copyright 2026 Otsoa Dubief
+# SPDX-License-Identifier: Apache-2.0
 """Reading shell commands and inline code the way the shell would, and spotting the ways a command can hide what it
 runs.
 

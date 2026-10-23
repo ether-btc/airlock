@@ -1,3 +1,5 @@
+# Copyright 2026 Otsoa Dubief
+# SPDX-License-Identifier: Apache-2.0
 """The decision: given a policy, a tool call and what airlock knows about the session, what happens.
 
 Pure functions, no Hermes import: everything Hermes-specific is gathered by the plugin (``__init__.py``) and passed in

@@ -1,3 +1,5 @@
+# Copyright 2026 Otsoa Dubief
+# SPDX-License-Identifier: Apache-2.0
 """``hermes airlock`` (owner's terminal) and ``/airlock`` (inside a conversation)."""
 from __future__ import annotations
 

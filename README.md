@@ -205,4 +205,4 @@ endorsed by Nous Research.
 
 ## License
 
-[Apache-2.0](LICENSE). Security issues: see [SECURITY.md](SECURITY.md).
+[Apache-2.0](LICENSE) · Copyright 2026 Otsoa Dubief. Redistributions keep the [NOTICE](NOTICE) file. Security issues: see [SECURITY.md](SECURITY.md).

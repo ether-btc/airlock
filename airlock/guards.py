@@ -1,3 +1,5 @@
+# Copyright 2026 Otsoa Dubief
+# SPDX-License-Identifier: Apache-2.0
 """Defenses that do not depend on reading commands: secrets that never leave, a canary in the agent's context,
 destinations named by untrusted content, and Unicode that hides what a command really is.
 

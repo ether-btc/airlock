@@ -1,3 +1,5 @@
+# Copyright 2026 Otsoa Dubief
+# SPDX-License-Identifier: Apache-2.0
 """YAML reading: ruamel.yaml (shipped with Hermes, read with the YAML 1.1 rules Hermes uses for config.yaml) when
 present, PyYAML otherwise (tests and tools outside Hermes)."""
 import io
