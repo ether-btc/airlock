@@ -137,9 +137,7 @@ def demo(core, pol):
 
 
 def status_text(core, pol, session=None):
-    core._load_taint(pol)
-    now = time.time()
-    live = {k: v for k, v in core.S.taint.items() if now - float(v.get("at", 0)) < pol.taint_ttl}
+    live = core._read_taint(pol)
     lines = [f"airlock {core.__version__} by {core.AUTHOR} · https://github.com/otsoa-dubief/airlock",
              f"mode {pol.mode}, profile {core._profile()} "
              f"({'guarded' if core._guarded(pol) else 'not guarded by this policy'})",

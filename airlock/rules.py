@@ -42,7 +42,8 @@ BUILD_FILES = {"Makefile", "makefile", "GNUmakefile", "package.json", "setup.py"
                "tox.ini", "noxfile.py", "conftest.py", "deno.json", "go.mod", ".npmrc", "requirements.txt"}
 
 
-GIT_HOOKS = re.compile(r"(^|/)\.git/hooks(/|$)|(^|/)\.husky(/|$)")
+# Files git runs or reads commands from later: hooks, and the repository config (core.hooksPath, core.fsmonitor...).
+GIT_HOOKS = re.compile(r"(^|/)\.git/(hooks(/|$)|config$)|(^|/)\.husky(/|$)")
 
 TOOL_REASONS = {
     "message": "sends a message to someone other than the owner",
@@ -418,9 +419,14 @@ def categories(pol, tool, args, ctx):
     if ctx.tainted and (text or tool == "browser_exec"):
         code_text = text or str(args.get("code") or "")
         code_views = code_text if tool == "execute_code" else "\n".join(shell.command_views(code_text))
-        urls = URL.findall(code_text)
-        local_only = urls and all(_loopback(u) or _domain_trusted(u, pol) for u in urls)
-        if (CODE_NETWORK.search(code_views) or SHELL_NETWORK_RAW.search(code_text)) and not local_only \
+        # Every line that reaches the network must name a local or trusted address in clear: a loopback URL on one
+        # line does not vouch for an address built at run time on another ('https://' + host, os.environ['X']).
+        net_lines = [ln for ln in (code_views + "\n" + code_text).splitlines()
+                     if CODE_NETWORK.search(ln) or SHELL_NETWORK_RAW.search(ln)]
+        local_only = bool(net_lines) and all(
+            URL.findall(ln) and all(_loopback(u) or _domain_trusted(u, pol) for u in URL.findall(ln))
+            and "://" not in URL.sub("", ln) for ln in net_lines)
+        if net_lines and not local_only \
                 and not any(f[0] == "exfil_url" for f in found):
             found.append(("exfil_url", "code that reaches the network after untrusted content (its address, body or "
                                        "timing can carry data)", "code_network_tainted"))
@@ -520,17 +526,36 @@ def taint_source(pol, tool, args, ctx):
 
 # --- Decision ---------------------------------------------------------------------------------------------------
 
-MAX_CHECKED = 200_000   # characters; a longer command or file is not read in full, it goes to the owner
+MAX_CHECKED = 200_000   # characters: beyond this, a call is not read in full (a decision must stay fast)
+CONTENT_KEYS = ("content", "patch", "new_string", "old_string")
+
+
+def _oversized(pol, tool, args, ctx, size):
+    """A call too long to read in full. Padding must never turn a wall into a mere approval: a command or code that
+    long is refused, and a file tool still gets its path walls; only the file's content goes unread."""
+    if tool in FILE_READ_TOOLS or tool in FILE_WRITE_TOOLS:
+        d = walls(pol, tool, {k: v for k, v in args.items() if k not in CONTENT_KEYS}, ctx)
+        if d:
+            return d
+        if tool in FILE_WRITE_TOOLS and (ctx.tainted or ctx.stopped):
+            level = "block" if ctx.stopped else "approve"
+            return Decision(level, "bypass", f"file content too long to check ({size} characters), written after "
+                                             "reading untrusted content", "size")
+        return None
+    return Decision("block", "bypass", f"arguments too long to check ({size} characters): split the work into "
+                                       "smaller steps", "size")
+
+
 
 
 def decide(pol, tool, args, ctx):
     """The worst Decision for a tool call, or None when nothing applies."""
     tool = str(tool or "")
     args = args if isinstance(args, dict) else {}
+    shell.new_decision()
     size = sum(len(t) for t in _texts(args))
     if size > MAX_CHECKED:
-        level = "block" if ctx.stopped else "approve"
-        return Decision(level, "bypass", f"arguments too long to check quickly ({size} characters)", "size")
+        return _oversized(pol, tool, args, ctx, size)
     d = walls(pol, tool, args, ctx)
     if d:
         return d

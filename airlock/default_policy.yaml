@@ -124,7 +124,7 @@ walls:
       pattern: '\bhermes\b[^\n;&|]*\bairlock\s+(resume|clear)\b'
       reason: "lifting the stop switch or a taint is the owner's decision, made outside the agent"
     - id: credential-cli
-      pattern: '\bgh\s+auth\s+(token|status\s+[^\n;&|]*--show-token)\b|\bsecurity\s+(find-(generic|internet)-password|dump-keychain)\b|\baws\s+configure\s+(get|export-credentials)\b|\bgcloud\s+auth\s+(print-access-token|print-identity-token)\b|\baz\s+account\s+get-access-token\b|\b(op\s+(read|item\s+get)|pass\s+show|bw\s+get|gopass\s+show|vault\s+(kv\s+)?read)\b|\bgit\s+credential\s+fill\b|\bsecret-tool\s+lookup\b'
+      pattern: '\bgh\s+auth\s+(token|status\s+[^\n;&|]*(--show-token|-t)\b)|\bsecurity\s+(find-(generic|internet)-password|dump-keychain)\b|\baws\s+configure\s+(get|export-credentials)\b|\bgcloud\s+auth\s+(print-access-token|print-identity-token)\b|\baz\s+account\s+get-access-token\b|\b(op\s+(read|item\s+get)|pass\s+show|bw\s+get|gopass\s+show|vault\s+(kv\s+)?(read|get))\b|\bgit\s+credential\s+fill\b|\bsecret-tool\s+lookup\b'
       reason: "credentials read through a CLI (tokens, keychain, password manager)"
     - id: hermes-config
       pattern: '\bhermes\b[^\n;&|]*\bconfig\b[^\n;&|]*\b(set|edit|unset|reset|migrate)\b'
@@ -163,7 +163,7 @@ egress:
   - {id: raw-socket, category: network_write, match: raw, pattern: '\b(nc|ncat|netcat|socat|telnet)\s+[^\n;&|]*\S+\s+\d+|/dev/(tcp|udp)/'}
   - {id: serve-files, category: network_write, pattern: '\bpython[\d.]*\s+-m\s+(http\.server|SimpleHTTPServer)\b|\b(ngrok|cloudflared|localtunnel|lt)\b[^\n;&|]*\s(http|tunnel|--port)\b|\bserveo\.net\b'}
   - {id: file-transfer, category: network_write, pattern: '\b(ftp|lftp|sftp|tftp|smbclient)\b|\brclone\s+(copy|sync|move|copyto|moveto)\b'}
-  - {id: python-http-write, category: network_write, pattern: '\b(requests|httpx|session)\.(post|put|patch|delete)\s*\(|\b(requests|httpx)\.request\s*\(\s*["''](POST|PUT|PATCH|DELETE)|\burlopen\s*\([^)]*\bdata\s*=|\burlopen\s*\([^(),]+,\s*[^)\s]|\bRequest\s*\([^)]*\b(data|method)\s*=|\baiohttp\b[^\n]*\.(post|put|patch|delete)\s*\('}
+  - {id: python-http-write, category: network_write, pattern: '\b(requests|httpx|session)\.(post|put|patch|delete)\s*\(|\b(requests|httpx)\.request\s*\(\s*["''](POST|PUT|PATCH|DELETE)|\burlopen\s*\([^)]*\bdata\s*=|\burlopen\s*\([^(),]+,\s*(?!\w+\s*=)[^)\s]|\bRequest\s*\([^)]*\b(data|method)\s*=|\baiohttp\b[^\n]*\.(post|put|patch|delete)\s*\('}
   - {id: python-mail-socket, category: network_write, pattern: '\bsmtplib\b|\bftplib\b|\bsocket\.(socket|create_connection)\b'}
   - {id: js-http-write, category: network_write, pattern: '\bfetch\s*\([^)]*method\s*:\s*["''](POST|PUT|PATCH|DELETE)|\baxios\.(post|put|patch|delete)\s*\(|\bnavigator\.sendBeacon\b'}
   # --- remote machines

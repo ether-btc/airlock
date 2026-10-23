@@ -38,7 +38,7 @@ class State:
         self.ctx = None
         self.policy = None
         self.policy_mtime = None
-        self.taint = {}           # last view of taint.json (the file is the source of truth)
+        self.unsaved = {}         # session -> taint entry that could not be written to taint.json (still enforced)
         self.parents = {}         # child session -> parent session
         self.written = {}         # session -> set of paths
 
@@ -121,7 +121,7 @@ def _stopped():
     return os.path.exists(os.path.join(_data_dir(), "STOP"))
 
 
-_config_cache = {"mtime": None, "data": {}}
+_config_cache = {"key": None, "data": {}}
 
 
 def _config():
@@ -131,14 +131,14 @@ def _config():
         mtime = os.path.getmtime(path)
     except OSError:
         return {}
-    if _config_cache["mtime"] != mtime:
+    if _config_cache["key"] != (path, mtime):
         try:
             from . import _yaml as yaml
             with open(path, encoding="utf-8") as f:
                 data = yaml.safe_load(f) or {}
-            _config_cache.update(mtime=mtime, data=data if isinstance(data, dict) else {})
+            _config_cache.update(key=(path, mtime), data=data if isinstance(data, dict) else {})
         except Exception:
-            _config_cache.update(mtime=mtime, data={})
+            _config_cache.update(key=(path, mtime), data={})
     return _config_cache["data"]
 
 
@@ -232,23 +232,30 @@ def _read_taint(pol):
             data = json.load(f)
     except Exception:
         return {}
-    now = time.time()
-    return {k: v for k, v in data.items() if isinstance(v, dict) and now - float(v.get("at", 0)) < pol.taint_ttl}
+    if not isinstance(data, dict):
+        return {}
+    return {k: v for k, v in data.items() if isinstance(v, dict) and _live(v, pol)}
+
+
+def _live(entry, pol):
+    """A taint entry still in force. An unreadable date keeps it: a hand-edited file must not unseal a session."""
+    try:
+        return time.time() - float(entry.get("at", 0)) < pol.taint_ttl
+    except (TypeError, ValueError):
+        return True
 
 
 def _write_taint(data):
+    """True when taint.json now holds `data`."""
     try:
         tmp = _taint_file() + f".{os.getpid()}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
             json.dump(data, f)
         os.replace(tmp, _taint_file())
+        return True
     except Exception as e:
         logger.warning("airlock: cannot save taint state: %s", e)
-
-
-def _load_taint(pol):
-    """Kept for the CLI: refresh the in-memory view from disk."""
-    S.taint = _read_taint(pol)
+        return False
 
 
 def session_key(kwargs):
@@ -257,6 +264,9 @@ def session_key(kwargs):
 
 def tainted(session, pol):
     t = _read_taint(pol).get(session)
+    if not t:                                    # a taint this process could not save still holds here
+        u = S.unsaved.get(session)
+        t = u if u and _live(u, pol) else None
     return t.get("source") if t else None
 
 
@@ -272,17 +282,22 @@ def mark(session, source, pol, why="taint"):
             if first:
                 journal(pol, {"type": why, "session": s, "source": source})
             s = S.parents.get(s)
-        _write_taint(data)
-        S.taint = data
+        if _write_taint(data):
+            for k in seen:
+                S.unsaved.pop(k, None)
+        else:
+            S.unsaved.update({k: data[k] for k in seen})
 
 
 def clear(session, pol):
     with _lock, _FileLock():
         data = _read_taint(pol)
+        was_unsaved = S.unsaved.pop(session, None) is not None
         if data.pop(session, None) is None:
-            return False
-        _write_taint(data)
-        S.taint = data
+            if not was_unsaved:
+                return False
+        else:
+            _write_taint(data)
     journal(pol, {"type": "taint_cleared", "session": session})
     return True
 
@@ -346,7 +361,8 @@ def approvals_bypassed():
             return "/yolo"
     except Exception:
         pass
-    approvals = (_config().get("approvals") or {}) if isinstance(_config().get("approvals"), dict) else {}
+    approvals = _config().get("approvals")
+    approvals = approvals if isinstance(approvals, dict) else {}
     if approvals.get("mode") is False or str(approvals.get("mode", "")).lower() in ("off", "false", "no"):
         return "approvals.mode: off"
     try:
@@ -376,14 +392,14 @@ def pre_tool_call(tool_name="", args=None, **kwargs):
             entry["type"] = f"would_{d.level}"
             journal(pol, entry)
             return None
-        journal(pol, entry)
-        if d.level == "log":
-            return None
         if d.level == "approve" and pol.approvals_off == "block":
             bypass = approvals_bypassed()
             if bypass:
                 d = rules.Decision("block", d.category, f"{d.reason}; nobody can approve it here ({bypass})", d.rule)
-                journal(pol, {**entry, "type": "block", "reason": d.reason})
+                entry.update(type="block", reason=d.reason)
+        journal(pol, entry)
+        if d.level == "log":
+            return None
         msg = rules.message(d, ctx, ctx.tainted)
         if d.level == "block":
             return {"action": "block", "message": msg}

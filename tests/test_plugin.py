@@ -212,3 +212,29 @@ def test_clear_from_another_process_reaches_a_running_one(plugin):
     data.pop("g1")
     f.write_text(_json.dumps(data))                     # what `hermes airlock clear g1` does from a terminal
     assert call(plugin, "browser_click", {"ref": "@e1"}, session="g1") is None
+
+
+def test_a_taint_that_cannot_be_saved_still_holds(plugin, monkeypatch):
+    monkeypatch.setattr(airlock, "_write_taint", lambda data: False)
+    done(plugin, "web_search", {"query": "x"}, session="h1")
+    assert call(plugin, "browser_click", {"ref": "@e1"}, session="h1")["action"] == "approve"
+    assert airlock.clear("h1", airlock.get_policy())
+    assert call(plugin, "browser_click", {"ref": "@e1"}, session="h1") is None
+
+
+def test_a_malformed_taint_entry_keeps_the_seal(plugin):
+    import json as _json
+    plugin.data.mkdir(parents=True, exist_ok=True)
+    (plugin.data / "taint.json").write_text(_json.dumps({"m1": {"source": "x", "at": "?"}}))
+    assert call(plugin, "browser_click", {"ref": "@e1"}, session="m1")["action"] == "approve"
+    assert airlock.clear("m1", airlock.get_policy())
+
+
+def test_a_symlink_made_later_is_resolved(tmp_path):
+    from airlock import shell
+    target = tmp_path / "secret"
+    target.mkdir()
+    before = shell.normalize("link/key", str(tmp_path))
+    (tmp_path / "link").symlink_to(target)
+    shell.new_decision()                     # what rules.decide does at the start of every tool call
+    assert shell.normalize("link/key", str(tmp_path)) == str((target / "key").resolve()) != before

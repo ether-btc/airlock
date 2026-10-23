@@ -285,11 +285,24 @@ CITED_PATH = re.compile(r"(?<![\w:/.~-])(~|\.{1,2}/|/)[^\s\"'`;&|<>(),]*")
 GLOB_CHARS = re.compile(r"[*?\[]")
 
 
+_normalized = {}
+
+
+def new_decision():
+    """Forget resolved paths: symlinks and the environment can change between two tool calls, not within one."""
+    _normalized.clear()
+
+
 def normalize(path, cwd=None) -> str:
-    return _normalize(str(path) if path else "", cwd or "")
+    """Cached for the current decision only (see new_decision)."""
+    key = (str(path) if path else "", cwd or "")
+    if key not in _normalized:
+        if len(_normalized) > 20000:
+            _normalized.clear()
+        _normalized[key] = _normalize(*key)
+    return _normalized[key]
 
 
-@functools.lru_cache(maxsize=8192)
 def _normalize(path, cwd) -> str:
     if not path:
         return ""

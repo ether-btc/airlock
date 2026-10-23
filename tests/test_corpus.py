@@ -43,3 +43,16 @@ def test_case(case, make_ctx, tmp_path):
     assert got == case["expect"], f"{case['name']}: got {got} ({d.category if d else ''}: {d.reason if d else ''})"
     if case.get("category"):
         assert d and d.category == case["category"], f"{case['name']}: category {d.category if d else None}"
+
+
+def test_padding_never_lowers_a_wall(make_ctx):
+    pol = policy.load(places())
+    ctx = make_ctx(origin="core")
+    d = rules.decide(pol, "terminal", {"command": "cat ~/.ssh/id_rsa # " + "x" * 200_001}, ctx)
+    assert d.level == "block"
+    d = rules.decide(pol, "write_file", {"path": "~/.zshrc", "content": "x" * 200_001}, ctx)
+    assert d.level == "block" and d.wall
+    assert rules.decide(pol, "write_file", {"path": "data.json", "content": "x" * 200_001}, ctx) is None
+    d = rules.decide(pol, "write_file", {"path": "data.json", "content": "x" * 200_001}, make_ctx(origin="core",
+                                                                                                   tainted="web"))
+    assert d.level == "approve"

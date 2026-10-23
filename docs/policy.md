@@ -80,7 +80,7 @@ egress:
 
 Files that hold what the agent remembers or runs later (`memories/`, `skills/`, `cron/`, `SOUL.md`). Writing them
 with a file tool or a command counts as `persistence`, like the `memory`, `skill_manage` and `cronjob_manage` tools.
-Git hooks (`.git/hooks/`, `.husky/`) count too, wherever the repository is. Reading them is free.
+Git hooks and the repository config (`.git/hooks/`, `.git/config`, `.husky/`) count too, wherever the repository is. Reading them is free.
 
 ## `tool_categories` and `read_actions`
 
