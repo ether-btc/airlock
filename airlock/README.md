@@ -14,6 +14,9 @@ pushes and deploys, memory and skill changes, browser clicks. Reading, searching
 - **Walls in every session**: keys and credential files, airlock's own files and Hermes's configuration, shell
   startup files, other profiles on the same machine.
 - **Reads commands as the shell does**: a command that hides what it runs is refused until it is written plainly.
+- **Catches an injection by its signature**: keys and tokens never leave in a call; a private marker in the
+  agent's context locks the session if it shows up in a call; a call to an address the untrusted content named is
+  blocked.
 - **Vets third-party tools**: plugin and MCP tools nobody admitted wait for your approval.
 - **Local**: no network call, no LLM call. A journal records every decision.
 

@@ -98,13 +98,32 @@ class Policy:
         self.trusted_domains = [str(d).lower().lstrip(".") for d in taint.get("trusted_domains") or []]
         self.untrusted_paths = [p for p in (self._place(x) for x in taint.get("untrusted_paths") or []) if p]
         self.taint_platforms = {str(p).lower() for p in taint.get("platforms") or []}
-        self.taint_ttl = float(taint.get("ttl_hours") or 72) * 3600
+        try:
+            ttl = float(taint.get("ttl_hours") or 72)
+            ttl = ttl if 0 < ttl < 1e6 else 72
+        except (TypeError, ValueError):
+            self.errors.append(f"taint.ttl_hours: {taint.get('ttl_hours')!r} is not a number of hours (72 kept)")
+            ttl = 72
+        self.taint_ttl = ttl * 3600
         tools = self.raw.get("tools") or {}
         self.admitted_plugins = {str(p).replace("_", "-") for p in tools.get("admitted_plugins") or []}
         self.admitted_mcp = {str(p) for p in tools.get("admitted_mcp_servers") or []}
         self.admitted_tools = {str(p) for p in tools.get("admitted_tools") or []}
         self.trusted_output = {str(p).replace("_", "-") for p in tools.get("trusted_output") or []}
         self.owner_channels = [str(c) for c in self.raw.get("owner_channels") or []]
+        self.secrets_out = "approve" if str(self.raw.get("secrets_out", "block")).lower() == "approve" else "block"
+        canary = self.raw.get("canary", True)                 # an empty value keeps the default; "no" in quotes is no
+        self.canary = True if canary is None else str(canary).lower() not in ("false", "no", "off", "0")
+        dest = self.raw.get("destinations", "block")
+        dest = "off" if dest is False else str(dest).lower()            # YAML 1.1 reads a bare `off` as false
+        self.destinations = dest if dest in ("block", "approve", "off") else "block"
+        breaker = self.raw.get("breaker", 3)
+        try:                                              # a count: not yes/no, not .inf; only 0 switches it off
+            self.breaker = 3 if isinstance(breaker, bool) else int(breaker)
+        except (TypeError, ValueError, OverflowError):
+            self.breaker = 3
+        if self.breaker < 0:
+            self.breaker = 3
         self.approvals_off = "follow" if str(self.raw.get("approvals_off", "block")).lower() == "follow" else "block"
         journal = self.raw.get("journal") or {}
         self.journal_enabled = bool(journal.get("enabled", True))

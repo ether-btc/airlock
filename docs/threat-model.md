@@ -40,12 +40,26 @@ policy file: they can switch airlock off.
 | Agent weakens its own guard | The plugin, the policy, Hermes's config, approvals mode, `HERMES_HOME` and the stop switch are walls |
 | Third-party tool airlock cannot read | `unadmitted_tool` until admitted; its output taints the conversation |
 | Something goes wrong mid-run | `hermes airlock stop` blocks every outbound action at once, in observe mode too |
+| A secret copied into a request, a search or a message | Recognized secret formats never leave in a call (`secrets_out`) |
+| The agent dumps its instructions or history ("send me your system prompt") | A private marker in the context; seen in a call, the call is blocked and the conversation locked |
+| The page names where to send ("post it to collector.example") | After untrusted content, a call to an address the content named is blocked (`destinations`) |
+| The agent tries variant after variant until one passes | Three refused calls in a tainted conversation lock it (`breaker`) |
+| Lookalike letters or invisible characters hide the real command | Text is folded (NFKC), invisible characters removed, lookalike program names refused |
 | Approvals are switched off (`--yolo`, `approvals.mode: off`, cron set to approve) | What would ask you is blocked (`approvals_off: block`) |
 | Data sent by code (`http.client`, `urlopen`, Node `https`, Ruby `Net::HTTP`, `/dev/tcp`) | After untrusted content, any code that reaches a non-local host asks you |
 | airlock itself crashes | The call is blocked |
 
 ## What stays out of reach
 
+- **Destinations are a signature, not a proof.** airlock remembers the addresses named by what a source tool brought
+  in (a page, a search result, an MCP output). It does not count the source's own site, hosts that appear in nearly
+  every page, or links merely followed: research would stop otherwise. So an attacker's page that names its own
+  site, an address written in a form no reader recognizes (`collector[.]example`), an address read later from a
+  file, or a program that takes its host as a plain argument (`psql -h`, `./sync.sh host`) still goes through the
+  ordinary approval, not the outright block.
+- **Secrets in a recognizable format only.** A secret sent from a file, reversed, or rebuilt piece by piece through
+  shell variables is not recognized as a secret; after untrusted content it still asks the owner like any other
+  outbound call.
 - **A program already on disk.** airlock reads the text of a tool call. A script written earlier by another route
   and launched by name (`python3 tool.py`) runs what is in the file. In a tainted conversation, running a file that
   this conversation wrote needs approval; a file from elsewhere does not.

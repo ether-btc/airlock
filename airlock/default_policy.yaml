@@ -38,6 +38,21 @@ actions:
 # (let Hermes auto-approve it, as it does for its own prompts).
 approvals_off: block
 
+# A recognized secret (private key, AWS, GitHub, OpenAI, Anthropic, Slack, Stripe, Google, Telegram... tokens) in a
+# call that leaves the machine: block (default) or approve.
+secrets_out: block
+
+# A private marker placed in the agent's context every turn. Seen in a tool call, it means the agent is copying out
+# its instructions or history: the call is blocked and the conversation locked.
+canary: true
+
+# After untrusted content, an outbound call to a host or address that this content named: block (default),
+# approve, or off.
+destinations: block
+
+# Refused calls in a tainted conversation before it is locked until the owner reviews it (0 = never lock).
+breaker: 3
+
 # Walls hold in every session, tainted or not, and nothing lifts them except editing this policy by hand.
 walls:
   # Never read nor written by the agent, by any tool or command (credentials, keys, browser profiles).

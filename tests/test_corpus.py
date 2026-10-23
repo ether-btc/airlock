@@ -11,7 +11,8 @@ CORPUS = yaml.safe_load(open(os.path.join(os.path.dirname(__file__), "corpus.yam
 
 def _expand(value):
     if isinstance(value, str):
-        return value.replace("file:///Users/me", "file://" + HOME)
+        # Key-shaped test values are assembled here, so the repository never holds a string a secret scanner flags.
+        return value.replace("file:///Users/me", "file://" + HOME).replace("{{HEX64}}", "0123456789abcdef" * 4)
     if isinstance(value, dict):
         return {k: _expand(v) for k, v in value.items()}
     if isinstance(value, list):
@@ -34,7 +35,8 @@ def test_case(case, make_ctx, tmp_path):
             (tmp_path / f).write_text("x")
     ctx = make_ctx(tainted="web_extract https://evil.example/page" if case.get("tainted") else None,
                    origin=case.get("origin", "core"), stopped=bool(case.get("stopped")),
-                   written={os.path.join(cwd, w) for w in case.get("written", [])}, cwd=cwd)
+                   written={os.path.join(cwd, w) for w in case.get("written", [])}, cwd=cwd,
+                   destinations=set(case.get("destinations", [])))
     args = _expand(case["args"])
     if case.get("huge"):
         args = {"command": "echo " + "x " * 120_000}

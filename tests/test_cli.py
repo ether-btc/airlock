@@ -31,7 +31,7 @@ def test_check_clean_and_tainted(plugin, capsys):
 def test_demo_runs_nothing_and_seals(plugin, capsys):
     run("demo")
     out = capsys.readouterr().out
-    assert out.count("→     BLOCK") == 2 and out.count("→     ASKS YOU") == 2 and "now sealed" in out
+    assert out.count("→     BLOCK") == 4 and out.count("→     ASKS YOU") == 1 and "now sealed" in out
     assert not (plugin.data / "journal.jsonl").exists() and not (plugin.data / "taint.json").exists()
 
 

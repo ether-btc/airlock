@@ -6,6 +6,7 @@ Pure functions, no Hermes import: everything Hermes-specific is gathered by the 
 from __future__ import annotations
 
 import glob
+import ipaddress
 import itertools
 import json
 import os
@@ -13,7 +14,7 @@ import re
 from dataclasses import dataclass, field
 from urllib.parse import unquote, urlparse
 
-from . import shell
+from . import guards, shell
 
 ORDER = {"allow": 0, "log": 1, "approve": 2, "block": 3}
 
@@ -67,6 +68,9 @@ class Context:
     owners: set = field(default_factory=set)   # chat ids of the owner's own channels
     written: set = field(default_factory=set)  # files this session wrote (paths), to spot "write then run"
     stopped: bool = False                   # the kill switch is on
+    canary: str | None = None               # the marker airlock puts in the agent's context; never in a tool call
+    destinations: set = field(default_factory=set)  # hosts and addresses named by the untrusted content read
+    locked: str | None = None               # why this session is locked (canary seen, repeated refused attempts)
 
 
 @dataclass
@@ -96,11 +100,13 @@ def under(path, root):
 
 
 def _texts(value):
-    """Every string inside a tool's arguments."""
+    """Every string inside a tool's arguments, dict keys included."""
     if isinstance(value, str):
         yield value
     elif isinstance(value, dict):
-        for v in value.values():
+        for k, v in value.items():
+            if isinstance(k, str):
+                yield k
             yield from _texts(v)
     elif isinstance(value, (list, tuple)):
         for v in value:
@@ -120,13 +126,25 @@ SHELL_NETWORK_RAW = re.compile(r"/dev/(tcp|udp)/|\bopenssl\s+s_client\b|\b(nc|nc
 
 
 def _domain_trusted(url, pol):
-    host = (urlparse(url).hostname or "").lower()
+    host = guards.hostname(url)
     return bool(host) and any(host == d or host.endswith("." + d) for d in pol.trusted_domains)
 
 
 def _loopback(url):
-    host = (urlparse(url if "://" in url else "https://" + url).hostname or "").lower()
-    return host in LOOPBACK or host.endswith(".localhost")
+    host = guards.hostname(url)
+    if host in LOOPBACK or host.endswith(".localhost"):
+        return True
+    try:
+        ip = ipaddress.ip_address(host)
+    except ValueError:
+        return False
+    return ip.is_loopback or ip.is_unspecified                             # 127.0.0.0/8, ::1, 0.0.0.0
+
+
+def _local_host(host, pol):
+    """True for a host (or the domain of an e-mail address) on this machine or in a trusted domain."""
+    host = host.rpartition("@")[2]
+    return _loopback("https://" + host) or _domain_trusted("https://" + host, pol)
 
 
 def failed(result):
@@ -223,7 +241,10 @@ def exfil_url(url, pol):
     """True if a URL to an untrusted host could carry data out in its query, path or host name."""
     if _domain_trusted(url, pol) or _loopback(url):
         return False
-    parsed = urlparse(url)
+    try:
+        parsed = urlparse(url)
+    except ValueError:                                        # https://[x: unreadable, so not vouched for
+        return True
     rest = (parsed.path or "") + ("?" + parsed.query if parsed.query else "")
     encoded = [t for t in re.findall(r"[A-Za-z0-9+=%_-]{40,}", unquote(rest))
                if re.search(r"\d", t) and re.search(r"[A-Za-z]", t)
@@ -287,7 +308,10 @@ def walls(pol, tool, args, ctx):
     if tool.startswith("browser_"):
         for t in _texts(args):
             for u in re.findall(r"file:[^\s\"'`<>)\]]+", t, re.I):
-                r = access_wall(shell.normalize(unquote(urlparse(u).path)), pol, ctx)
+                try:
+                    r = access_wall(shell.normalize(unquote(urlparse(u).path)), pol, ctx)
+                except ValueError:
+                    r = None
                 if r:
                     return Decision("block", "wall", r, "walls.paths", True)
     return None
@@ -448,7 +472,7 @@ def categories(pol, tool, args, ctx):
             untrusted = [h for h in hosts if not _domain_trusted(h if "://" in h else "https://" + h, pol)
                          and not _loopback(h)]
             if NET_COMMAND.search(views) and untrusted and not any(f[0] == "exfil_url" for f in found):
-                host = urlparse(untrusted[0]).hostname if "://" in untrusted[0] else untrusted[0]
+                host = guards.hostname(untrusted[0]) or untrusted[0]
                 found.append(("exfil_url", f"network call to {host} after untrusted content (the address can carry "
                                            "data)",
                               "shell_network_tainted"))
@@ -558,12 +582,88 @@ def _oversized(pol, tool, args, ctx, size):
 
 
 
+OUTBOUND = {"message", "network_write", "publish", "remote", "exfil_url", "install", "delegation"}
+SEARCH_TOOLS = {"web_search", "x_search", "web_extract", "browser_navigate", "vision_analyze", "video_analyze"}
+# Tools whose arguments go to an outside service whatever they name (a search engine, a model, a voice).
+PROVIDER_TOOLS = SEARCH_TOOLS - {"browser_navigate"} | {"image_generate", "text_to_speech"}
+# Programs that only read or print what they are given: an address in their arguments is text, not a destination.
+LOCAL_PROGRAMS = shell.PURE_READERS - {"awk", "gawk", "mawk", "nawk"}           # gawk opens /inet/tcp sockets
+
+
 def decide(pol, tool, args, ctx):
-    """The worst Decision for a tool call, or None when nothing applies."""
+    """The worst Decision for a tool call, or None when nothing applies. Commands are judged as the shell reads them
+    (raw text); secrets, the canary and destinations are looked for in every form the values take."""
     tool = str(tool or "")
     args = args if isinstance(args, dict) else {}
     shell.new_decision()
-    size = sum(len(t) for t in _texts(args))
+    guards.new_decision()
+    texts = list(_texts(args))
+    size = sum(len(t) for t in texts)
+    if size > MAX_CHECKED and tool not in FILE_READ_TOOLS and tool not in FILE_WRITE_TOOLS:
+        return _oversized(pol, tool, args, ctx, size)            # refused unread, and fast: no scan of megabytes
+    # The context marker leaving in a tool call means the agent is copying out its own instructions or history.
+    if ctx.canary and guards.carries_canary(texts, ctx.canary):
+        return Decision("block", "canary", "this call carries airlock's private session marker: the agent is copying "
+                                           "its own context out, which only an injected instruction asks for",
+                        "canary", True)
+    d = _decide(pol, tool, args, ctx, texts)
+    if ctx.locked and (d is None or d.level != "block"):
+        reaches_out = d is not None or tool in SEARCH_TOOLS or tool in PROVIDER_TOOLS or _third_party(ctx) or any(
+            not _loopback(u) and not _domain_trusted(u, pol) for u in tool_urls(tool, args))
+        if reaches_out:
+            return Decision("block", d.category if d else "locked", f"this conversation is locked ({ctx.locked}); "
+                            "the owner must review it before anything leaves", "locked")
+    return d
+
+
+def _third_party(ctx):
+    """A plugin or MCP tool: airlock cannot see where it sends what it is given."""
+    return bool(ctx.origin) and ctx.origin != "core"
+
+
+def _local_only(tool, args, texts, found, pol):
+    """True when the call can only reach this machine or trusted hosts: a command, code or a page load (other tools
+    send their arguments to a service, whatever URL they name) that names at least one URL, every URL and every other
+    address it names (mail recipient, ssh or scp host, network command's host) loopback or trusted, and no channel
+    without a URL (a message, a remote shell, the page open in the browser, an agent)."""
+    if tool not in COMMAND_TOOLS and tool not in ("process_manage", "browser_navigate"):
+        return False
+    if any(c in ("message", "remote", "browser_input", "delegation") for c, _, _ in found):
+        return False
+    urls = tool_urls(tool, args) + [u for t in texts for u in URL.findall(t)]
+    if not urls or not all(_loopback(u) or _domain_trusted(u, pol) for u in urls):
+        return False
+    return all(_local_host(a, pol) for a in guards.call_addresses(texts))
+
+
+def _program_words(text):
+    """The program of every simple command (its name, not its directory), those run by sh -c, eval, find -exec and
+    xargs included."""
+    return [os.path.basename(line.split(" ", 1)[0]) for line in shell.command_views(text, code=False)]
+
+
+def _address_texts(pol, tool, args, texts):
+    """Where a call's addresses are looked for. A message goes to its target: a link in its text is not where it goes.
+    A command is read as the shell runs it, its variables substituted: a quoted text with spaces (a commit message, an
+    echo), a heredoc that no interpreter reads and the arguments of grep or echo are prose, not addresses. A task handed
+    to another agent names no address: that agent inherits the conversation's addresses. Other arguments are read as
+    is."""
+    if tool == "send_message":
+        return [str(args.get("target") or "")]
+    if pol.tool_categories.get(tool) == "delegation":
+        return []
+    text = command_text(tool, args)
+    if tool != "terminal" or not text:
+        return texts
+    p = shell.parse(text)
+    prose = {b for k, _, b in p.heredocs if k < len(p.segments) and not shell.is_interpreter(shell.verb(p.segments[k]))}
+    views = [v for v in dict.fromkeys(shell.command_views(text) + shell.command_views(shell.substitute_vars(text)))
+             if v not in prose and os.path.basename(v.split(" ", 1)[0]) not in LOCAL_PROGRAMS]
+    return [t for t in texts if t != text] + views          # cat <<EOF notes, grep and echo name, never reach
+
+
+def _decide(pol, tool, args, ctx, texts):
+    size = sum(len(t) for t in texts)
     if size > MAX_CHECKED:
         return _oversized(pol, tool, args, ctx, size)
     d = walls(pol, tool, args, ctx)
@@ -572,7 +672,9 @@ def decide(pol, tool, args, ctx):
     worst = None
     text = command_text(tool, args)
     if text:
-        reason = shell.bypass(text, code=tool == "execute_code")
+        reason = (guards.disguised_command(text, _program_words(text)) if tool != "execute_code" else
+                  ("characters that reorder or hide text in code" if guards.REORDERING.search(text) else None)) or \
+            shell.bypass(text, code=tool == "execute_code")
         if reason:
             worst = Decision(pol.action("bypass", bool(ctx.tainted)), "bypass", reason, "bypass")
     if tool in FILE_WRITE_TOOLS and ctx.tainted:
@@ -582,11 +684,52 @@ def decide(pol, tool, args, ctx):
             worst = Decision(pol.action("bypass", True), "bypass", "a script that computes or hides what it runs, "
                              "written after reading untrusted content", "bypass.written")
     found = categories(pol, tool, args, ctx)
+    run = text or (str(args.get("code") or "") if tool == "browser_exec" else "")
+    addresses = guards.call_addresses(_address_texts(pol, tool, args, [run])) if run else []
+    if ctx.tainted and run and not any(c == "exfil_url" for c, _, _ in found):
+        # Whatever the program (a renamed curl, pip install from a URL, git clone): after untrusted content, a command
+        # that names a remote address can carry data out or bring code in.
+        remote = [a for a in addresses if "@" not in a and not _local_host(a, pol)]
+        if remote:
+            found.append(("exfil_url", f"a command that reaches {remote[0]} after untrusted content", "remote_address"))
+    # A secret leaving and an address named by the untrusted content are signals, not verdicts: they join the other
+    # decisions (the worst wins, the stop switch still blocks); on a tie their reason is the more precise one.
+    secret = destination = None
+    outbound = any(c in OUTBOUND or c == "browser_input" for c, _, _ in found) or tool in SEARCH_TOOLS \
+        or tool in PROVIDER_TOOLS or tool == "send_message" or _third_party(ctx) or bool(tool_urls(tool, args)) \
+        or any(not _local_host(a, pol) for a in addresses)                  # dig <token>.host, nc host 4444
+    if outbound and not _local_only(tool, args, texts, found, pol):
+        hit = guards.find_secret(texts)
+        if hit:
+            name, strong = hit
+            level = "block" if strong and pol.secrets_out == "block" else "approve"
+            article = "an" if name[0] in "AEIOUx" or name.startswith("npm") else "a"      # an AWS, an xAI, an npm
+            secret = Decision(level, "secret", f"{article} {name} would leave the machine in clear; secrets go through "
+                                               "an environment variable or the tool's own login, never in a call",
+                              "secret", level == "block")
+    if ctx.tainted and ctx.destinations and pol.destinations != "off":
+        named = guards.named_destination(_address_texts(pol, tool, args, texts), ctx.destinations,
+                                         ignore=lambda h: _local_host(h, pol))
+        if named:
+            address, mail = named
+            sends = any(c in OUTBOUND for c, _, _ in found)
+            carries = sends or text or tool == "browser_exec" or any(
+                "?" in u or ("#" in u and "=" in u.split("#", 1)[1]) for u in tool_urls(tool, args))
+            if carries:
+                level = "approve" if (mail or not sends or pol.destinations == "approve") else "block"
+                destination = Decision(level, "destination", f"reaches {address}, an address named by the untrusted "
+                                                             "content this conversation read: the signature of an "
+                                                             "injected instruction. If it is legitimate, the owner can "
+                                                             "trust the domain or clear the conversation",
+                                       "destination", level == "block")
     for cat, reason, rule in found:
         level = pol.action(cat, bool(ctx.tainted))
         d = Decision(level, cat, reason, rule)
         worst = d if worst is None else worst.worse(d)
-    if ctx.stopped and found:
+    for signal in (destination, secret):
+        if signal and (worst is None or ORDER[signal.level] >= ORDER[worst.level]):
+            worst = signal
+    if ctx.stopped and (found or secret or destination):
         first = worst if worst and worst.level != "allow" else Decision("allow", found[0][0], found[0][1], found[0][2])
         worst = Decision("block", first.category, f"{first.reason}; the airlock stop switch is on", first.rule)
     if worst and worst.level == "allow":

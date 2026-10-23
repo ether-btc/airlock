@@ -992,11 +992,11 @@ def argv_literals(code: str) -> list:
     return out
 
 
-def command_views(text: str, depth: int = 0) -> list:
+def command_views(text: str, depth: int = 0, code: bool = True) -> list:
     """What a command line actually runs, one line per simple command: its words, with any word that holds a space
     replaced by "…" (a text value such as a commit message, not a subcommand). Shell strings run by sh -c, eval,
     watch and heredocs read by a shell are opened and read the same way. Inline code (python -c, heredocs read by
-    python) is returned as is, with its literal argument lists."""
+    python) is returned as is, with its literal argument lists; with code=False, only command lines are returned."""
     if depth > 4:
         return []
     p = parse(text or "")
@@ -1014,29 +1014,29 @@ def command_views(text: str, depth: int = 0) -> list:
         v = os.path.basename(w[0])
         if v in REEVALUATING_SHELLS - {".", "source"} or v in ("watch", "su", "runuser"):
             if v == "eval":
-                out += command_views(" ".join(w[1:]), depth + 1)
+                out += command_views(" ".join(w[1:]), depth + 1, code)
             else:
                 for j, a in enumerate(w[1:-1], 1):
                     if re.fullmatch(r"-[a-zA-Z]*c[a-zA-Z]*", a):
-                        out += command_views(w[j + 1], depth + 1)
+                        out += command_views(w[j + 1], depth + 1, code)
                         break
                 if v == "watch" and len(w) > 1 and not w[-1].startswith("-"):
-                    out += command_views(w[-1], depth + 1)
+                    out += command_views(w[-1], depth + 1, code)
         if v == "find":
             for j, a in enumerate(w):
                 if a in ("-exec", "-execdir", "-ok", "-okdir"):
                     out.append(" ".join(x for x in w[j + 1:] if x not in (";", "+", "{}")))
         if v == "xargs" or (w and os.path.basename((words(seg) or [""])[0]) == "xargs"):
             out.append(" ".join(w))
-        lang, code = _inline_code(v, w[1:])
-        if code is not None:
-            out.append(code)
-            out += argv_literals(code)
+        lang, inline = _inline_code(v, w[1:])
+        if code and inline is not None:
+            out.append(inline)
+            out += argv_literals(inline)
     for k, quoted, body in p.heredocs:
         v = verb(p.segments[k]) if k < len(p.segments) else ""
         if v in REEVALUATING_SHELLS:
-            out += command_views(body, depth + 1)
-        elif body:
+            out += command_views(body, depth + 1, code)
+        elif body and code:
             out.append(body)
             out += argv_literals(body)
     return out

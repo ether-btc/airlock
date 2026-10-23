@@ -34,6 +34,12 @@ it, the post to the webhook waits at Hermes's own approval menu; the owner picks
   substitution, aliases, wildcard program names, `sh -c`, `find -exec`, heredocs, inline Python, Perl, Ruby and
   Node: a command that computes or hides what it runs is refused with a short note asking the agent to write it in
   clear. Everyday pipes (`curl ... | jq`, `... | python3 -c 'import json...'`, `| perl -pe 's/a/b/'`) stay free.
+- **Catches an injection by its signature.** Secrets in a recognizable format (private keys, cloud, GitHub, OpenAI,
+  Anthropic, Slack, Stripe tokens...) never leave in a call, whatever the conversation. A private marker sits in the
+  agent's context: if it shows up in a tool call, the agent is copying out its own instructions, and the conversation
+  is locked. After untrusted content, a call to an address that this content named is blocked outright. Three
+  refused calls in a tainted conversation lock it until you review it. Program names spelled with lookalike letters
+  (`ɡit`, Cyrillic `с`) and invisible characters are refused.
 - **Refuses tools nobody admitted.** A tool from a third-party plugin or an MCP server is something airlock cannot
   read. It needs approval until you admit it in your policy, and its output taints the conversation unless you trust
   it.
@@ -76,6 +82,10 @@ Each tool call gets the strictest of what applies:
 | Category | Examples | Clean conversation | Tainted conversation |
 |---|---|---|---|
 | wall | `~/.ssh`, `.env`, the guard's files, `hermes config set`, `--yolo`, `rm -rf ~` | **block** | **block** |
+| secret | a recognized key or token in a call that leaves the machine | **block** | **block** |
+| canary | airlock's private context marker in any tool call (the conversation is then locked) | **block** | **block** |
+| destination | a call to a host or address named by the untrusted content read | free | **block** |
+| locked | anything outbound in a conversation locked by the canary or by 3 refused calls | **block** | **block** |
 | bypass | `eval "$(...)"`, `base64 -d \| sh`, `$G push`, `/usr/bin/g?t push` | **block** | **block** |
 | message | `send_message` to a third party, `mail`, Slack and Discord webhooks | asks you | asks you |
 | network_write | `curl -d`, `curl -T`, `requests.post`, `nc host port`, SMTP | asks you | asks you |
@@ -150,6 +160,10 @@ airlock is a guard on what the agent asks its tools to do. It is one layer, not 
 - **It cannot stop a human who approves everything.** Approvals are the point where you decide.
 - **Environment variables are not walls.** A secret exported in the agent's environment can be printed
   (`printenv`). Keep secrets out of the agent's environment, or in Hermes's own secret store.
+- **Signatures catch the common shapes.** Secret formats, the canary and named destinations are recognized in the
+  forms an injection usually takes (encoded, split, quoted, in another script), not in every possible form. What they
+  miss still meets the ordinary approval in a tainted conversation. Details in
+  [docs/threat-model.md](docs/threat-model.md#what-stays-out-of-reach).
 - **Some memory is per process.** The link between a subagent and its parent, and the list of files a conversation
   wrote, do not survive a restart. Taints do.
 - **It runs inside Hermes.** For hard isolation, run the agent's terminal on an isolated backend (Docker, SSH) and
