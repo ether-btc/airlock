@@ -140,7 +140,8 @@ def status_text(core, pol, session=None):
     core._load_taint(pol)
     now = time.time()
     live = {k: v for k, v in core.S.taint.items() if now - float(v.get("at", 0)) < pol.taint_ttl}
-    lines = [f"airlock — mode {pol.mode}, profile {core._profile()} "
+    lines = [f"airlock {core.__version__} by {core.AUTHOR} · https://github.com/otsoa-dubief/airlock",
+             f"mode {pol.mode}, profile {core._profile()} "
              f"({'guarded' if core._guarded(pol) else 'not guarded by this policy'})",
              f"policy: {pol.source}" + (f" — {len(pol.errors)} error(s), see `hermes airlock policy`" if pol.errors
                                         else ""),

@@ -44,9 +44,15 @@ the plugin's data directory. If airlock itself crashes on a call, that call is b
 ## Install
 
 ```bash
-hermes plugins install otsoa-dubief/airlock/airlock
-hermes plugins enable airlock
+hermes plugins install otsoa-dubief/airlock/airlock --force --enable
+hermes gateway restart        # if a gateway is running
 ```
+
+Why `--force`: Hermes scans every plugin it installs, and airlock's policy lists the very things it guards against
+(shell startup files, `crontab`, credential commands, exfiltration patterns). The scanner reports them as
+`caution`, never `dangerous`, and asks for `--force` before installing a community plugin with that verdict. Read
+the findings it prints. Once airlock is listed in the Hermes catalog, `hermes plugins install airlock` will need no
+flag.
 
 Then start a new session, and restart a running gateway so it loads the plugin. `hermes airlock status` shows what
 is in force; `/plugins` in a session lists the plugins loaded.

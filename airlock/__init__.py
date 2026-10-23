@@ -25,6 +25,8 @@ from . import rules
 
 logger = logging.getLogger(__name__)
 PLUGIN = "airlock"
+__version__ = "0.1.0"
+AUTHOR = "Otsoa Dubief"
 HERE = os.path.dirname(os.path.abspath(__file__))
 _lock = threading.RLock()
 

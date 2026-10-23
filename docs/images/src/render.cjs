@@ -99,12 +99,12 @@ background-size:32px 32px}
 h1{font:700 ${big ? 104 : 92}px/1 'Space Grotesk',sans-serif;margin:14px 0 18px;letter-spacing:-.03em}
 p{font:400 ${big ? 25 : 23}px/1.4 Inter,sans-serif;color:${C.mist};margin:0}
 .foot{margin-top:26px;font:400 13px 'JetBrains Mono',monospace;color:${C.slate}}
-.by{margin-top:34px;padding-top:18px;border-top:1px solid ${C.line};font:400 17px Inter,sans-serif;color:${C.mist}}
+.by{margin-top:${big ? 34 : 22}px;padding-top:${big ? 18 : 14}px;border-top:1px solid ${C.line};font:400 17px Inter,sans-serif;color:${C.mist}}
 .by b{font-weight:600;color:${C.paper}}
 </style></head><body><div class="left"><div class="kicker">guardrails for Hermes Agent</div><h1>airlock</h1>
 <p>Once a conversation reads something untrusted, nothing leaves without you.</p>
 <div class="foot">local · no LLM call · fail-closed · Apache-2.0</div>
-${big ? '<div class="by">by <b>Otsoa Dubief</b> · github.com/otsoa-dubief/airlock</div>' : ''}</div>${chamber(big ? 1.05 : 1)}</body></html>`;
+<div class="by">by <b>Otsoa Dubief</b>${big ? ' · github.com/otsoa-dubief/airlock' : ''}</div></div>${chamber(big ? 1.05 : 1)}</body></html>`;
 }
 
 // --- How it works --------------------------------------------------------------------------------------------
