@@ -36,10 +36,9 @@ class State:
         self.ctx = None
         self.policy = None
         self.policy_mtime = None
-        self.taint = {}           # session -> {"source": str, "at": float}
+        self.taint = {}           # last view of taint.json (the file is the source of truth)
         self.parents = {}         # child session -> parent session
         self.written = {}         # session -> set of paths
-        self.loaded_taint = False
 
 
 S = State()
@@ -120,27 +119,41 @@ def _stopped():
     return os.path.exists(os.path.join(_data_dir(), "STOP"))
 
 
+_config_cache = {"mtime": None, "data": {}}
+
+
+def _config():
+    """The profile's config.yaml, parsed once per change."""
+    path = os.path.join(_hermes_home(), "config.yaml")
+    try:
+        mtime = os.path.getmtime(path)
+    except OSError:
+        return {}
+    if _config_cache["mtime"] != mtime:
+        try:
+            from . import _yaml as yaml
+            with open(path, encoding="utf-8") as f:
+                data = yaml.safe_load(f) or {}
+            _config_cache.update(mtime=mtime, data=data if isinstance(data, dict) else {})
+        except Exception:
+            _config_cache.update(mtime=mtime, data={})
+    return _config_cache["data"]
+
+
 def _owners(pol):
     owners = {c for c in pol.owner_channels if c != "auto"}
     if "auto" in pol.owner_channels:
-        try:
-            from . import _yaml as yaml
-            with open(os.path.join(_hermes_home(), "config.yaml"), encoding="utf-8") as f:
-                cfg = yaml.safe_load(f) or {}
-
-            def walk(node):
-                if isinstance(node, dict):
-                    hc = node.get("home_channel")
-                    if isinstance(hc, dict) and hc.get("chat_id") is not None:
-                        owners.add(str(hc["chat_id"]))
-                    for v in node.values():
-                        walk(v)
-                elif isinstance(node, list):
-                    for v in node:
-                        walk(v)
-            walk(cfg)
-        except Exception:
-            pass
+        def walk(node):
+            if isinstance(node, dict):
+                hc = node.get("home_channel")
+                if isinstance(hc, dict) and hc.get("chat_id") is not None:
+                    owners.add(str(hc["chat_id"]))
+                for v in node.values():
+                    walk(v)
+            elif isinstance(node, list):
+                for v in node:
+                    walk(v)
+        walk(_config())
     return owners
 
 
@@ -188,27 +201,52 @@ def _taint_file():
     return os.path.join(_data_dir(), "taint.json")
 
 
-def _load_taint(pol):
-    if S.loaded_taint:
-        return
-    S.loaded_taint = True
+class _FileLock:
+    """Advisory lock on taint.json's companion file: several Hermes processes (CLI, gateway, cron) share the state."""
+
+    def __enter__(self):
+        self.f = open(_taint_file() + ".lock", "a")
+        try:
+            import fcntl
+            fcntl.flock(self.f, fcntl.LOCK_EX)
+        except Exception:
+            pass
+        return self
+
+    def __exit__(self, *exc):
+        try:
+            import fcntl
+            fcntl.flock(self.f, fcntl.LOCK_UN)
+        except Exception:
+            pass
+        self.f.close()
+
+
+def _read_taint(pol):
+    """The taint map on disk, expired entries dropped. Read on every call, so a `hermes airlock clear` run in a
+    terminal reaches a gateway that is already running."""
     try:
         with open(_taint_file(), encoding="utf-8") as f:
             data = json.load(f)
-        now = time.time()
-        S.taint = {k: v for k, v in data.items() if now - float(v.get("at", 0)) < pol.taint_ttl}
     except Exception:
-        S.taint = {}
+        return {}
+    now = time.time()
+    return {k: v for k, v in data.items() if isinstance(v, dict) and now - float(v.get("at", 0)) < pol.taint_ttl}
 
 
-def _save_taint():
+def _write_taint(data):
     try:
-        tmp = _taint_file() + ".tmp"
+        tmp = _taint_file() + f".{os.getpid()}.tmp"
         with open(tmp, "w", encoding="utf-8") as f:
-            json.dump(S.taint, f)
+            json.dump(data, f)
         os.replace(tmp, _taint_file())
     except Exception as e:
         logger.warning("airlock: cannot save taint state: %s", e)
+
+
+def _load_taint(pol):
+    """Kept for the CLI: refresh the in-memory view from disk."""
+    S.taint = _read_taint(pol)
 
 
 def session_key(kwargs):
@@ -216,37 +254,35 @@ def session_key(kwargs):
 
 
 def tainted(session, pol):
-    _load_taint(pol)
-    t = S.taint.get(session)
-    if t and time.time() - float(t.get("at", 0)) < pol.taint_ttl:
-        return t.get("source")
-    return None
+    t = _read_taint(pol).get(session)
+    return t.get("source") if t else None
 
 
 def mark(session, source, pol, why="taint"):
-    """Taint a session, its known ancestors too (a child's findings flow back into its parent)."""
-    with _lock:
-        _load_taint(pol)
-        seen = set()
-        s = session
+    """Taint a session, and its known ancestors too (a child's findings flow back into its parent)."""
+    with _lock, _FileLock():
+        data = _read_taint(pol)
+        seen, s = set(), session
         while s and s not in seen:
             seen.add(s)
-            first = s not in S.taint
-            S.taint[s] = {"source": source if first else S.taint[s]["source"], "at": time.time()}
+            first = s not in data
+            data[s] = {"source": source if first else data[s].get("source", source), "at": time.time()}
             if first:
                 journal(pol, {"type": why, "session": s, "source": source})
             s = S.parents.get(s)
-        _save_taint()
+        _write_taint(data)
+        S.taint = data
 
 
 def clear(session, pol):
-    with _lock:
-        _load_taint(pol)
-        if S.taint.pop(session, None) is not None:
-            _save_taint()
-            journal(pol, {"type": "taint_cleared", "session": session})
-            return True
-    return False
+    with _lock, _FileLock():
+        data = _read_taint(pol)
+        if data.pop(session, None) is None:
+            return False
+        _write_taint(data)
+        S.taint = data
+    journal(pol, {"type": "taint_cleared", "session": session})
+    return True
 
 
 # --- Journal --------------------------------------------------------------------------------------------------------
@@ -297,6 +333,29 @@ def _context(pol, kwargs, tool):
                          written=set(S.written.get(session, ())), stopped=_stopped())
 
 
+def approvals_bypassed():
+    """Why Hermes would approve without asking anyone, or None: --yolo, approvals.mode off, a cron job whose
+    approvals.cron_mode is approve. airlock then blocks instead of asking (policy `approvals_off`)."""
+    if str(os.environ.get("HERMES_YOLO_MODE", "")).strip().lower() in ("1", "true", "yes", "on"):
+        return "--yolo"
+    try:
+        from tools.approval import is_current_session_yolo_enabled
+        if is_current_session_yolo_enabled():
+            return "/yolo"
+    except Exception:
+        pass
+    approvals = (_config().get("approvals") or {}) if isinstance(_config().get("approvals"), dict) else {}
+    if approvals.get("mode") is False or str(approvals.get("mode", "")).lower() in ("off", "false", "no"):
+        return "approvals.mode: off"
+    try:
+        in_cron = S.ctx is not None and S.ctx.current_cron_execution() is not None
+    except Exception:
+        in_cron = False
+    if in_cron and str(approvals.get("cron_mode", "deny")).lower() == "approve":
+        return "approvals.cron_mode: approve"
+    return None
+
+
 def pre_tool_call(tool_name="", args=None, **kwargs):
     try:
         pol = get_policy()
@@ -311,13 +370,18 @@ def pre_tool_call(tool_name="", args=None, **kwargs):
                  "rule": d.rule, "reason": d.reason, "tainted": ctx.tainted}
         if pol.journal_args:
             entry["args"] = _short(args)
-        if pol.mode == "observe":
+        if pol.mode == "observe" and not ctx.stopped:      # the stop switch is an emergency: it holds in observe too
             entry["type"] = f"would_{d.level}"
             journal(pol, entry)
             return None
         journal(pol, entry)
         if d.level == "log":
             return None
+        if d.level == "approve" and pol.approvals_off == "block":
+            bypass = approvals_bypassed()
+            if bypass:
+                d = rules.Decision("block", d.category, f"{d.reason}; nobody can approve it here ({bypass})", d.rule)
+                journal(pol, {**entry, "type": "block", "reason": d.reason})
         msg = rules.message(d, ctx, ctx.tainted)
         if d.level == "block":
             return {"action": "block", "message": msg}
@@ -336,7 +400,10 @@ def post_tool_call(tool_name="", args=None, result=None, **kwargs):
         args = args if isinstance(args, dict) else {}
         session = session_key(kwargs)
         ctx = _context(pol, kwargs, tool_name)
-        source = None if rules.failed(result) else rules.taint_source(pol, tool_name, args, ctx)
+        # A structured failure of a built-in tool brought nothing in. A third-party tool's error text still reaches
+        # the model, so it taints like any other output.
+        trusted_failure = ctx.origin == "core" and rules.failed(result)
+        source = None if trusted_failure else rules.taint_source(pol, tool_name, args, ctx)
         if source:
             mark(session, source, pol)
         if tool_name in rules.FILE_WRITE_TOOLS:

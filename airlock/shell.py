@@ -12,6 +12,7 @@ they execute inside the command itself, and the routes that write the guard's ow
 from __future__ import annotations
 
 import ast
+import functools
 import glob
 import itertools
 import os
@@ -45,7 +46,12 @@ class Parsed:
 
 
 def parse(text: str) -> Parsed:
-    text = text or ""
+    """Cached: the same command is read by several rules. Callers must not modify the result."""
+    return _parse(text or "")
+
+
+@functools.lru_cache(maxsize=1024)
+def _parse(text: str) -> Parsed:
     p = Parsed()
     cur, pending = [], []
     quote, i, n = None, 0, len(text)
@@ -158,6 +164,12 @@ def segments(text: str) -> list:
 
 def words(segment: str):
     """Words of a simple command (shlex), with assignments and redirections removed; None if unreadable."""
+    w = _words(segment)
+    return None if w is None else list(w)
+
+
+@functools.lru_cache(maxsize=4096)
+def _words(segment: str):
     try:
         raw = shlex.split(segment)
     except ValueError:
@@ -172,7 +184,7 @@ def words(segment: str):
             out.append(a)
     while out and re.match(r"^\w+=", out[0]):
         out = out[1:]
-    return out
+    return tuple(out)
 
 
 def tokens(segment: str):
@@ -274,6 +286,11 @@ GLOB_CHARS = re.compile(r"[*?\[]")
 
 
 def normalize(path, cwd=None) -> str:
+    return _normalize(str(path) if path else "", cwd or "")
+
+
+@functools.lru_cache(maxsize=8192)
+def _normalize(path, cwd) -> str:
     if not path:
         return ""
     path = os.path.expanduser(os.path.expandvars(str(path).strip()))
@@ -285,18 +302,15 @@ def normalize(path, cwd=None) -> str:
 def bare_words(text: str) -> list:
     """Words of every simple command that could name a file relative to the working directory (``cat .env``,
     ``--file=config/credentials.json``), including commands inside $(...), sh -c and find -exec."""
-    out = []
+    out = {}
     for t in variants(text or ""):
-        lines = list(parse(t).segments)
-        for view in command_views(t):
-            lines.append(view)
-        for line in lines:
+        for line in dict.fromkeys(list(parse(t).segments) + command_views(t)):
             w = words(line) if line else None
             for a in (w if w is not None else line.split()):
                 a = a.split("=", 1)[1] if a.startswith("-") and "=" in a else a
-                if a and not a.startswith("-") and not re.search(r"[$`{}\s]", a) and a not in out:
-                    out.append(a)
-    return out
+                if a and a not in out and not a.startswith("-") and not re.search(r"[$`{}]", a):
+                    out[a] = True
+    return list(out)
 
 
 def code_strings(code: str) -> list:

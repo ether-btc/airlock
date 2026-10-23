@@ -15,7 +15,7 @@ Reading, searching and drafting stay free.
 
 <p align="center"><img src="docs/images/live-session.gif" alt="A real Hermes session with airlock: asked to summarize a pricing page and post the summary to a webhook, the agent reads the page (which hides instructions for AI assistants); the webhook post stops at Hermes's approval menu with airlock's reason; the owner denies it; the agent delivers the summary, sends nothing and flags the injection." width="100%"></p>
 
-<p align="center"><sub>A real session, recorded, not simulated: Hermes Agent v0.22.2, airlock, <code>claude-haiku-5-5</code>. The
+<p align="center"><sub>A real session, recorded, not simulated: a development build of Hermes Agent 0.22.2, airlock, <code>claude-haiku-5-5</code>. The
 <a href="docs/images/src/session/pricing.html">pricing page</a> hides a note for AI assistants. Once the agent has read
 it, the post to the webhook waits at Hermes's own approval menu; the owner picks Deny.</sub></p>
 
@@ -81,7 +81,7 @@ Each tool call gets the strictest of what applies:
 | persistence | `memory` writes, `skill_manage`, cron jobs, `crontab`, `launchctl` | logged | asks you |
 | delegation | `kanban_create`, another agent session (`hermes chat -q`) | free | asks you |
 | browser_input | `browser_click`, `browser_type`, `browser_exec`, saved logins | free | asks you |
-| exfil_url | a URL whose query, path or host name carries encoded data | free | asks you |
+| exfil_url | a URL whose query, path or host name carries encoded data; after untrusted content, any network call from the shell or from code to a host you have not trusted | free | asks you |
 | written_script | running a file this conversation wrote | free | asks you |
 
 "Asks you" uses Hermes's own approval gate (`approve` in the policy): a prompt in the terminal, buttons on Telegram and other gateways. Where
@@ -89,6 +89,10 @@ nobody can answer (cron jobs, unattended runs), it fails closed. Approving "alwa
 never a family of calls.
 
 Messages to your own home channels are not outbound. Everything in the table is a setting.
+
+When nobody can approve (`--yolo`, `approvals.mode: off`, a cron job with `approvals.cron_mode: approve`), Hermes
+would let "asks you" actions through on its own. airlock blocks them instead; set `approvals_off: follow` in your
+policy to let Hermes decide.
 
 ## Configure
 
@@ -138,9 +142,25 @@ airlock is a guard on what the agent asks its tools to do. It is one layer, not 
 - **It does not inspect what an approved action carries.** Approving a push or a message approves its content. Read
   the approval prompt.
 - **It cannot stop a human who approves everything.** Approvals are the point where you decide.
+- **Environment variables are not walls.** A secret exported in the agent's environment can be printed
+  (`printenv`). Keep secrets out of the agent's environment, or in Hermes's own secret store.
+- **Some memory is per process.** The link between a subagent and its parent, and the list of files a conversation
+  wrote, do not survive a restart. Taints do.
 - **It runs inside Hermes.** For hard isolation, run the agent's terminal on an isolated backend (Docker, SSH) and
-  the plugins out of process (`plugins.isolation: host`), and keep your credentials where the agent's user cannot
-  read them. See [docs/threat-model.md](docs/threat-model.md).
+  keep your credentials where the agent's user cannot read them. airlock is built for Hermes's default in-process
+  plugins: under `plugins.isolation: host` it cannot tell a third-party plugin's tools from Hermes's own, and
+  `hermes airlock` commands are not available. See [docs/threat-model.md](docs/threat-model.md).
+
+## What airlock reads and writes
+
+- Reads your profile's `config.yaml` (your home channels, and whether approvals are switched off) and its own
+  policy file.
+- Reads directory listings to expand wildcards in commands (`cat ~/.ss*/*`), so a pattern cannot hide a protected
+  path.
+- Writes, in its data directory (`<HERMES_HOME>/plugin-data/airlock/`): a journal of decisions, taints and approvals
+  (tool arguments included, truncated; `journal: {args: none}` to leave them out), the taint state, and the stop
+  switch.
+- Makes no network call and no LLM call, and runs no command.
 
 ## Tests
 

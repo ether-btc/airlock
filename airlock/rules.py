@@ -1,7 +1,7 @@
 """The decision: given a policy, a tool call and what airlock knows about the session, what happens.
 
 Pure functions, no Hermes import: everything Hermes-specific is gathered by the plugin (``__init__.py``) and passed in
-``Context``. Tested by tests/test_rules.py and the attack corpus in tests/attacks.
+``Context``. Tested by tests/test_corpus.py (cases in tests/corpus.yaml) and tests/test_taint.py.
 """
 from __future__ import annotations
 
@@ -41,6 +41,8 @@ BUILD_FILES = {"Makefile", "makefile", "GNUmakefile", "package.json", "setup.py"
                "Rakefile", "Dockerfile", "docker-compose.yml", "docker-compose.yaml", "compose.yml", "compose.yaml",
                "tox.ini", "noxfile.py", "conftest.py", "deno.json", "go.mod", ".npmrc", "requirements.txt"}
 
+
+GIT_HOOKS = re.compile(r"(^|/)\.git/hooks(/|$)|(^|/)\.husky(/|$)")
 
 TOOL_REASONS = {
     "message": "sends a message to someone other than the owner",
@@ -97,6 +99,15 @@ def _texts(value):
 
 
 LOOPBACK = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+# Code that can reach the network, in any language Hermes can run. After untrusted content, its address, body or timing
+# can carry data out, whatever the method.
+CODE_NETWORK = re.compile(
+    r"\b(urlopen|urlretrieve|Request\s*\(|requests\.|httpx\.|aiohttp|urllib3|http\.client|HTTPS?Connection|"
+    r"socket\.(socket|create_connection)|smtplib|ftplib|telnetlib|xmlrpc|websockets?\b|paramiko|pycurl|"
+    r"fetch\s*\(|XMLHttpRequest|axios|https?\.(request|get)\s*\(|require\(\s*[\"']https?[\"']\s*\)|"
+    r"node:https?|net\.connect|Net::HTTP|open-uri|URI\.open|TCPSocket|LWP::|HTTP::Tiny|IO::Socket|"
+    r"curl_exec|fsockopen|file_get_contents\s*\(\s*[\"']https?:|Invoke-WebRequest|Invoke-RestMethod)")
+SHELL_NETWORK_RAW = re.compile(r"/dev/(tcp|udp)/|\bopenssl\s+s_client\b|\b(nc|ncat|netcat|socat|telnet)\b")
 
 
 def _domain_trusted(url, pol):
@@ -150,10 +161,10 @@ def access_wall(path, pol, ctx):
     if any(rx.search(path) for rx in pol.secret_files) and not any(rx.search(path) for rx in pol.secret_except):
         return "file that holds secrets"
     if pol.isolate_profiles and ctx.hermes_root:
-        profiles = os.path.realpath(_profiles_root(ctx))
-        own = os.path.realpath(ctx.hermes_home) if ctx.hermes_home else ""
+        profiles = shell.normalize(_profiles_root(ctx))
+        own = shell.normalize(ctx.hermes_home) if ctx.hermes_home else ""
         # The default profile lives at the root, which holds the other profiles: none of them is its own.
-        mine = own and own != os.path.realpath(ctx.hermes_root) and under(path, own)
+        mine = own and own != shell.normalize(ctx.hermes_root) and under(path, own)
         if under(path, profiles) and path != profiles and not mine:
             return "another Hermes profile's data"
     return None
@@ -172,18 +183,23 @@ def write_wall(path, pol, ctx):
 def _protected_matcher(pol, ctx, cwd):
     """A predicate on raw text: does it name a path the agent may not write? Used by shell.writes_protected."""
     roots = pol.write_only + pol.read_write
+    seen_raw, seen_path = {}, {}
+
+    def path_protected(c):
+        if c not in seen_path:
+            p = shell.normalize(c, cwd)
+            seen_path[c] = any(under(p, r) for r in roots) or any(rx.search(p) for rx in pol.secret_files) or \
+                bool(pol.isolate_profiles and ctx.hermes_root and
+                     access_wall(p, pol, ctx) == "another Hermes profile's data")
+        return seen_path[c]
 
     def protected(raw):
         raw = raw or ""
-        cands = [m.group(0) for m in shell.CITED_PATH.finditer(shell.fold(raw))]
-        cands += [t for t in re.split(r"[\s\"'=;&|<>(),]+", raw) if t]
-        for c in cands:
-            p = shell.normalize(c, cwd)
-            if any(under(p, r) for r in roots) or any(rx.search(p) for rx in pol.secret_files):
-                return True
-            if pol.isolate_profiles and ctx.hermes_root and access_wall(p, pol, ctx) == "another Hermes profile's data":
-                return True
-        return False
+        if raw not in seen_raw:
+            cands = [m.group(0) for m in shell.CITED_PATH.finditer(shell.fold(raw))]
+            cands += [t for t in re.split(r"[\s\"'=;&|<>(),]+", raw) if t]
+            seen_raw[raw] = any(path_protected(c) for c in dict.fromkeys(cands))
+        return seen_raw[raw]
     protected.roots, protected.cwd = roots, cwd
     return protected
 
@@ -317,8 +333,13 @@ def _is_read_action(pol, tool, args):
     return bool(acts) and all(str(a) in reads for a in acts)
 
 
+NOT_OUTBOUND_MESSAGE_ACTIONS = {"list", "react", "unreact"}
+
+
 def _message_to_owner(args, ctx):
-    if str(args.get("action") or "send") != "send":
+    """True when a send_message call leaves nothing with anyone but the owner (listing, reacting, or the owner's
+    own channels). Any other action (send, forward, reply, edit...) to another chat is outbound."""
+    if str(args.get("action") or "send").strip().lower() in NOT_OUTBOUND_MESSAGE_ACTIONS:
         return True
     target = str(args.get("target") or "").strip()
     if not target or ":" not in target:
@@ -360,7 +381,7 @@ def categories(pol, tool, args, ctx):
         if tool in FILE_WRITE_TOOLS:
             for p in [args.get("path"), args.get("file_path")] + PATCH_FILES.findall(str(args.get("patch") or "")):
                 n = shell.normalize(p, ctx.cwd) if p else ""
-                if n and any(under(n, r) for r in pol.persistence_paths):
+                if n and (any(under(n, r) for r in pol.persistence_paths) or GIT_HOOKS.search(n)):
                     hit = pretty(n, ctx)
         elif text:
             roots = pol.persistence_paths
@@ -369,7 +390,8 @@ def categories(pol, tool, args, ctx):
             def persistent(raw):
                 cands = [m.group(0) for m in shell.CITED_PATH.finditer(shell.fold(raw or ""))]
                 cands += [t for t in re.split(r"[\s\"'=;&|<>(),]+", raw or "") if t]
-                return any(any(under(shell.normalize(c, cwd), r) for r in roots) for c in cands)
+                return any(any(under(n, r) for r in roots) or bool(GIT_HOOKS.search(n))
+                           for n in (shell.normalize(c, cwd) for c in cands))
             if shell.writes_protected(text, persistent):
                 hit = "the agent's memory, skills or scheduled jobs"
         if hit:
@@ -393,6 +415,15 @@ def categories(pol, tool, args, ctx):
         if exfil_url(u, pol):
             found.append(("exfil_url", f"URL that could carry data out ({u[:60]})", "exfil_url"))
             break
+    if ctx.tainted and (text or tool == "browser_exec"):
+        code_text = text or str(args.get("code") or "")
+        code_views = code_text if tool == "execute_code" else "\n".join(shell.command_views(code_text))
+        urls = URL.findall(code_text)
+        local_only = urls and all(_loopback(u) or _domain_trusted(u, pol) for u in urls)
+        if (CODE_NETWORK.search(code_views) or SHELL_NETWORK_RAW.search(code_text)) and not local_only \
+                and not any(f[0] == "exfil_url" for f in found):
+            found.append(("exfil_url", "code that reaches the network after untrusted content (its address, body or "
+                                       "timing can carry data)", "code_network_tainted"))
     if text and tool != "execute_code":
         views = "\n".join(shell.command_views(text))
         if NET_COMMAND.search(views) and re.search(r"\$\(|`", text) and URL_OR_HOST_SUBST.search(text):
@@ -472,6 +503,11 @@ def taint_source(pol, tool, args, ctx):
             return f"{tool} {p}"[:120]
         return None
     text = command_text(tool, args) or (str(args.get("code") or "") if tool == "browser_exec" else "")
+    if text and pol.untrusted_paths:
+        hit = shell.find_cited_path(text, ctx.cwd, lambda p: p if any(under(p, r) for r in pol.untrusted_paths)
+                                    else None)
+        if hit:
+            return f"{tool} {hit}"[:120]
     if text:
         views = "\n".join(shell.command_views(text)) if tool != "execute_code" else text
         if any(rx.search(views) for rx in pol.source_patterns):
@@ -484,10 +520,17 @@ def taint_source(pol, tool, args, ctx):
 
 # --- Decision ---------------------------------------------------------------------------------------------------
 
+MAX_CHECKED = 200_000   # characters; a longer command or file is not read in full, it goes to the owner
+
+
 def decide(pol, tool, args, ctx):
     """The worst Decision for a tool call, or None when nothing applies."""
     tool = str(tool or "")
     args = args if isinstance(args, dict) else {}
+    size = sum(len(t) for t in _texts(args))
+    if size > MAX_CHECKED:
+        level = "block" if ctx.stopped else "approve"
+        return Decision(level, "bypass", f"arguments too long to check quickly ({size} characters)", "size")
     d = walls(pol, tool, args, ctx)
     if d:
         return d
@@ -503,12 +546,14 @@ def decide(pol, tool, args, ctx):
         if content and SCRIPT_EXT.search(path) and shell.bypass(content) and not path.lower().endswith(".py"):
             worst = Decision(pol.action("bypass", True), "bypass", "a script that computes or hides what it runs, "
                              "written after reading untrusted content", "bypass.written")
-    for cat, reason, rule in categories(pol, tool, args, ctx):
+    found = categories(pol, tool, args, ctx)
+    for cat, reason, rule in found:
         level = pol.action(cat, bool(ctx.tainted))
         d = Decision(level, cat, reason, rule)
         worst = d if worst is None else worst.worse(d)
-    if worst and ctx.stopped and ORDER[worst.level] >= ORDER["log"]:
-        worst = Decision("block", worst.category, f"{worst.reason}; the airlock stop switch is on", worst.rule)
+    if ctx.stopped and found:
+        first = worst if worst and worst.level != "allow" else Decision("allow", found[0][0], found[0][1], found[0][2])
+        worst = Decision("block", first.category, f"{first.reason}; the airlock stop switch is on", first.rule)
     if worst and worst.level == "allow":
         return None
     return worst

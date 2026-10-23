@@ -101,6 +101,7 @@ class Policy:
         self.admitted_tools = {str(p) for p in tools.get("admitted_tools") or []}
         self.trusted_output = {str(p).replace("_", "-") for p in tools.get("trusted_output") or []}
         self.owner_channels = [str(c) for c in self.raw.get("owner_channels") or []]
+        self.approvals_off = "follow" if str(self.raw.get("approvals_off", "block")).lower() == "follow" else "block"
         journal = self.raw.get("journal") or {}
         self.journal_enabled = bool(journal.get("enabled", True))
         self.journal_args = str(journal.get("args", "full")).lower() != "none"

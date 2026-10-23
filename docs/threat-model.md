@@ -39,7 +39,9 @@ policy file: they can switch airlock off.
 | Agent reads a key or a token | Walls on credential paths and secret file names, in every tool and command, including paths built in pieces or through wildcards |
 | Agent weakens its own guard | The plugin, the policy, Hermes's config, approvals mode, `HERMES_HOME` and the stop switch are walls |
 | Third-party tool airlock cannot read | `unadmitted_tool` until admitted; its output taints the conversation |
-| Something goes wrong mid-run | `hermes airlock stop` blocks every outbound action at once |
+| Something goes wrong mid-run | `hermes airlock stop` blocks every outbound action at once, in observe mode too |
+| Approvals are switched off (`--yolo`, `approvals.mode: off`, cron set to approve) | What would ask you is blocked (`approvals_off: block`) |
+| Data sent by code (`http.client`, `urlopen`, Node `https`, Ruby `Net::HTTP`, `/dev/tcp`) | After untrusted content, any code that reaches a non-local host asks you |
 | airlock itself crashes | The call is blocked |
 
 ## What stays out of reach
@@ -58,7 +60,8 @@ policy file: they can switch airlock off.
 ## Recommended setup around airlock
 
 - Run the agent's terminal on an isolated backend (Docker or SSH) so its commands do not run as you.
-- Set `plugins.isolation: host` so third-party plugins run in their own process.
+- Keep plugins in process (Hermes's default) for airlock. Under `plugins.isolation: host`, airlock cannot tell a
+  third-party plugin's tools from Hermes's own, so it cannot hold them for approval.
 - Keep credentials out of the agent user's reach when you can, rather than relying on walls alone.
 - For an agent that talks to customers, list its platforms under `taint.platforms`.
 - Read `hermes airlock log --type approve` from time to time: it shows what your agents asked to do.

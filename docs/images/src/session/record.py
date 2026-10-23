@@ -4,7 +4,7 @@ import json, os, pty, re, select, sys, time
 import pyte
 
 cast, cmd, steps = sys.argv[1], sys.argv[2:3], json.loads(sys.argv[3])
-cols, rows = 110, 34
+cols, rows = int(os.environ.get("COLS", "110")), int(os.environ.get("ROWS", "34"))
 pid, fd = pty.fork()
 if pid == 0:
     os.environ.update({"COLUMNS": str(cols), "LINES": str(rows), "TERM": "xterm-256color"})

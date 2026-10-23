@@ -197,16 +197,16 @@ async function demoGif(page) {
 async function liveGif(page) {
   const src = path.join(__dirname, 'session', 'frames.json');
   if (!fs.existsSync(src)) return null;
-  const { frames } = JSON.parse(fs.readFileSync(src, 'utf8'));
+  const { frames, width } = JSON.parse(fs.readFileSync(src, 'utf8'));
   const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'airlock-live-'));
   const list = [];
   for (let f = 0; f < frames.length; f++) {
     const [body, secs] = frames[f];
     await page.setContent(`<!doctype html><html><head><meta charset="utf-8">${FONTS}<style>
 body{margin:0;background:transparent}${TERM_CSS}
-pre{font:400 13px/1.42 'JetBrains Mono',monospace;color:${C.paper};white-space:pre;padding:14px 18px}</style></head><body>
-<div class="term" style="width:${Math.ceil(110 * 7.85 + 36)}px"><div class="bar"><i></i><i></i><i></i>
-<b>Live session · ${esc(VERSION)} with airlock · claude-haiku-5-5 · recorded, not simulated</b></div><pre>${body}</pre></div></body></html>`);
+pre{font:400 14.3px/1.42 'JetBrains Mono',monospace;color:${C.paper};white-space:pre;padding:14px 18px}</style></head><body>
+<div class="term" style="width:${Math.ceil(width * 8.6 + 36)}px"><div class="bar"><i></i><i></i><i></i>
+<b>Live session · Hermes Agent dev build · airlock · claude-haiku-5-5 · recorded, not simulated</b></div><pre>${body}</pre></div></body></html>`);
     await page.evaluate(() => document.fonts.ready);
     const file = path.join(dir, `f${String(f).padStart(4, '0')}.png`);
     await page.locator('.term').screenshot({ path: file });

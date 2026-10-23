@@ -35,6 +35,12 @@ Categories: `message`, `network_write`, `publish`, `remote`, `install`, `persist
 `browser_input`, `exfil_url`, `detach`, `written_script`, `unadmitted_tool`, `bypass`. Walls are not a category:
 they always block.
 
+## `approvals_off`
+
+`block` (default) or `follow`. When Hermes would approve without asking anyone (`--yolo`, `approvals.mode: off`, a
+cron job with `approvals.cron_mode: approve`), `block` turns every "asks you" into a block; `follow` lets Hermes
+auto-approve it like its own prompts.
+
 ## `walls`
 
 | Key | Meaning |
@@ -42,10 +48,14 @@ they always block.
 | `read_write` | Paths the agent may neither read nor write, with any tool or command |
 | `write` | Paths the agent may read but never write (the guard, Hermes's config, startup files) |
 | `secret_files` | Regular expressions on full paths: files that hold secrets wherever they are |
+| `secret_files_except` | Paths that match `secret_files` but are not secrets (`.env.example`, design tokens) |
 | `isolate_profiles` | `true` (default): another Hermes profile's directory is out of reach |
 | `words` | Case-insensitive regular expressions that must never appear in any tool call (a command, a file being written, a message) |
 | `commands` | `{id, pattern, reason}`: commands refused outright (switching the guard or approvals off, changing `HERMES_HOME`) |
 | `destructive` | Patterns of catastrophic deletions |
+
+Your file can add walls but not remove the default ones: lists are appended, and `disable` only reaches
+`walls.commands` and `egress` ids. To narrow a default wall, edit your copy of the plugin, knowingly.
 
 Paths are checked after resolving `~`, variables, symlinks and `..`, in the arguments of file tools, in commands and
 code (including paths built in pieces: `os.path.join('~', '.ss' + 'h')`, `Path.home() / '.aws'`), and through
@@ -70,7 +80,7 @@ egress:
 
 Files that hold what the agent remembers or runs later (`memories/`, `skills/`, `cron/`, `SOUL.md`). Writing them
 with a file tool or a command counts as `persistence`, like the `memory`, `skill_manage` and `cronjob_manage` tools.
-Reading them is free.
+Git hooks (`.git/hooks/`, `.husky/`) count too, wherever the repository is. Reading them is free.
 
 ## `tool_categories` and `read_actions`
 
@@ -85,7 +95,7 @@ Hermes tools by category (`send_message: message`, `memory: persistence`...), an
 | `source_tools` | Tools whose output taints the conversation (web, browser, X search, A2A, Discord...) |
 | `source_patterns` | Commands and code that read from the network (`curl https://...`, `git clone`, `requests.get`...) |
 | `trusted_domains` | Reading only from these domains (and their subdomains) does not taint |
-| `untrusted_paths` | Reading files under these paths taints (`~/Downloads` by default) |
+| `untrusted_paths` | Reading files under these paths, with a file tool or a command, taints (`~/Downloads` by default) |
 | `platforms` | Conversations on these platforms are tainted from their first message (customer-facing agents) |
 | `ttl_hours` | A taint expires after this long without new untrusted reads (72 by default) |
 

@@ -35,7 +35,10 @@ def test_case(case, make_ctx, tmp_path):
     ctx = make_ctx(tainted="web_extract https://evil.example/page" if case.get("tainted") else None,
                    origin=case.get("origin", "core"), stopped=bool(case.get("stopped")),
                    written={os.path.join(cwd, w) for w in case.get("written", [])}, cwd=cwd)
-    d = rules.decide(pol, case["tool"], _expand(case["args"]), ctx)
+    args = _expand(case["args"])
+    if case.get("huge"):
+        args = {"command": "echo " + "x " * 120_000}
+    d = rules.decide(pol, case["tool"], args, ctx)
     got = d.level if d else "allow"
     assert got == case["expect"], f"{case['name']}: got {got} ({d.category if d else ''}: {d.reason if d else ''})"
     if case.get("category"):

@@ -33,6 +33,11 @@ actions:
   unadmitted_tool:  {clean: approve, tainted: approve}   # a plugin or MCP tool nobody admitted (see `tools:`)
   bypass:           {clean: block,   tainted: block}     # a command that computes or hides what it runs
 
+# When Hermes would approve without asking anyone (--yolo, approvals.mode: off, a cron job with
+# approvals.cron_mode: approve), what becomes of an action airlock sends for approval: block (default) or follow
+# (let Hermes auto-approve it, as it does for its own prompts).
+approvals_off: block
+
 # Walls hold in every session, tainted or not, and nothing lifts them except editing this policy by hand.
 walls:
   # Never read nor written by the agent, by any tool or command (credentials, keys, browser profiles).
@@ -118,6 +123,9 @@ walls:
     - id: airlock-cli
       pattern: '\bhermes\b[^\n;&|]*\bairlock\s+(resume|clear)\b'
       reason: "lifting the stop switch or a taint is the owner's decision, made outside the agent"
+    - id: credential-cli
+      pattern: '\bgh\s+auth\s+(token|status\s+[^\n;&|]*--show-token)\b|\bsecurity\s+(find-(generic|internet)-password|dump-keychain)\b|\baws\s+configure\s+(get|export-credentials)\b|\bgcloud\s+auth\s+(print-access-token|print-identity-token)\b|\baz\s+account\s+get-access-token\b|\b(op\s+(read|item\s+get)|pass\s+show|bw\s+get|gopass\s+show|vault\s+(kv\s+)?read)\b|\bgit\s+credential\s+fill\b|\bsecret-tool\s+lookup\b'
+      reason: "credentials read through a CLI (tokens, keychain, password manager)"
     - id: hermes-config
       pattern: '\bhermes\b[^\n;&|]*\bconfig\b[^\n;&|]*\b(set|edit|unset|reset|migrate)\b'
       reason: "Hermes configuration is changed by the owner, outside the agent"
@@ -152,10 +160,10 @@ egress:
   - {id: curl-write, category: network_write, pattern: '\bcurl\b[^\n;&|]*\s(-d|--data[\w-]*|-F|--form[\w-]*|-T|--upload-file|--json|(-X|--request)\s*["'']?(POST|PUT|PATCH|DELETE))(\s|=|$)'}
   - {id: wget-write, category: network_write, pattern: '\bwget\b[^\n;&|]*\s--(post-data|post-file|body-data|body-file|method[= ]["'']?(POST|PUT|PATCH|DELETE))'}
   - {id: httpie-write, category: network_write, pattern: '\b(http|https|xh|xhs)\s+(-\S+\s+)*(POST|PUT|PATCH|DELETE)\s|\b(http|https|xh|xhs)\s+(-\S+\s+)*\S+\s+[\w.-]+(:=|=)'}
-  - {id: raw-socket, category: network_write, pattern: '\b(nc|ncat|netcat|socat|telnet)\s+[^\n;&|]*\S+\s+\d+|/dev/(tcp|udp)/'}
+  - {id: raw-socket, category: network_write, match: raw, pattern: '\b(nc|ncat|netcat|socat|telnet)\s+[^\n;&|]*\S+\s+\d+|/dev/(tcp|udp)/'}
   - {id: serve-files, category: network_write, pattern: '\bpython[\d.]*\s+-m\s+(http\.server|SimpleHTTPServer)\b|\b(ngrok|cloudflared|localtunnel|lt)\b[^\n;&|]*\s(http|tunnel|--port)\b|\bserveo\.net\b'}
   - {id: file-transfer, category: network_write, pattern: '\b(ftp|lftp|sftp|tftp|smbclient)\b|\brclone\s+(copy|sync|move|copyto|moveto)\b'}
-  - {id: python-http-write, category: network_write, pattern: '\b(requests|httpx|session)\.(post|put|patch|delete)\s*\(|\b(requests|httpx)\.request\s*\(\s*["''](POST|PUT|PATCH|DELETE)|\burlopen\s*\([^)]*\bdata\s*=|\bRequest\s*\([^)]*\b(data|method)\s*=|\baiohttp\b[^\n]*\.(post|put|patch|delete)\s*\('}
+  - {id: python-http-write, category: network_write, pattern: '\b(requests|httpx|session)\.(post|put|patch|delete)\s*\(|\b(requests|httpx)\.request\s*\(\s*["''](POST|PUT|PATCH|DELETE)|\burlopen\s*\([^)]*\bdata\s*=|\burlopen\s*\([^(),]+,\s*[^)\s]|\bRequest\s*\([^)]*\b(data|method)\s*=|\baiohttp\b[^\n]*\.(post|put|patch|delete)\s*\('}
   - {id: python-mail-socket, category: network_write, pattern: '\bsmtplib\b|\bftplib\b|\bsocket\.(socket|create_connection)\b'}
   - {id: js-http-write, category: network_write, pattern: '\bfetch\s*\([^)]*method\s*:\s*["''](POST|PUT|PATCH|DELETE)|\baxios\.(post|put|patch|delete)\s*\(|\bnavigator\.sendBeacon\b'}
   # --- remote machines
@@ -165,9 +173,12 @@ egress:
   - {id: mail-cli, category: message, pattern: '(^|[\s;&|(])(mail|mailx|sendmail|msmtp|mutt|neomutt|swaks|ssmtp)\s'}
   - {id: chat-webhooks, category: message, pattern: 'hooks\.slack\.com/|discord(app)?\.com/api/webhooks/|api\.telegram\.org/bot[^/\s]+/send|graph\.facebook\.com/[^\s]*/messages|api\.twilio\.com/|outlook\.office(365)?\.com/webhook'}
   - {id: macos-send, category: message, pattern: '\bosascript\b[^\n]*(application\s+"?(Messages|Mail)"?|\bsend\b)'}
+  # --- installing code into Hermes
+  - {id: hermes-install, category: install, pattern: '\bhermes\b[^\n;&|]*\b(plugins?|skills?|mcp|hooks)\s+(install|add|enable|update|tap|adopt)\b'}
   # --- persistence
   - {id: crontab, category: persistence, pattern: '\bcrontab\b(?![^\n;&|]*\s-l\b)'}
   - {id: launch-agents, category: persistence, pattern: '\blaunchctl\s+(load|bootstrap|enable|submit|kickstart)\b|\bsystemctl\s+(--user\s+)?(enable|link|edit|set-property)\b|\bschtasks\s+/create\b'}
+  - {id: git-run-later, category: persistence, pattern: '\bgit\b[^\n;&|]*\bconfig\b[^\n;&|]*\b(core\.(hooksPath|fsmonitor|sshCommand|pager|editor)|alias\.\S+\s+["'']?!|filter\.\w+\.(clean|smudge))'}
   - {id: hermes-cron, category: persistence, pattern: '\bhermes\b[^\n;&|]*\bcron\s+(create|add|edit|update|resume|run)\b'}
   # --- delegation (a new agent session would start without this session's taint)
   - {id: hermes-chat, category: delegation, pattern: '\bhermes\b[^\n;&|]*\s(chat|-z|run)\b'}
