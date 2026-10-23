@@ -4,7 +4,7 @@ verdict  : allow
 $ hermes airlock check "git push origin main"
 verdict  : approve — the owner is asked first
 category : publish
-why      : git push
+why      : publishes outside this machine (git push)
 rule     : egress.git-push
 
 $ hermes airlock check "cat ~/.ssh/id_ed25519"

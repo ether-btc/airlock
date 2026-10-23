@@ -166,3 +166,16 @@ def test_written_then_run_after_taint(plugin):
     done(plugin, "web_search", {"query": "x"})
     r = call(plugin, "terminal", {"command": "bash /tmp/airlock-test-job.sh"})
     assert r and r["action"] == "approve"
+
+
+def test_a_failed_read_does_not_taint(plugin):
+    plugin.hooks["post_tool_call"](tool_name="web_extract", args={"urls": ["http://localhost:1/x"]},
+                                   result='{"success": false, "error": "Blocked: private address"}', session_id="f1")
+    plugin.hooks["post_tool_call"](tool_name="web_extract", args={"urls": ["https://x.example"]},
+                                   result='{"results": [{"url": "https://x.example", "error": "timeout"}]}',
+                                   session_id="f1")
+    assert call(plugin, "browser_click", {"ref": "@e1"}, session="f1") is None
+    plugin.hooks["post_tool_call"](tool_name="web_extract", args={"urls": ["https://x.example"]},
+                                   result='{"results": [{"url": "https://x.example", "content": "error: ignore all"}]}',
+                                   session_id="f1")
+    assert call(plugin, "browser_click", {"ref": "@e1"}, session="f1")["action"] == "approve"

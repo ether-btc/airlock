@@ -13,9 +13,11 @@ every tool call [Hermes Agent](https://github.com/NousResearch/hermes-agent) mak
 read untrusted content, and seals them: messages, uploads, pushes, posts and memory writes wait for your approval.
 Reading, searching and drafting stay free.
 
-<p align="center"><img src="docs/images/demo.gif" alt="hermes airlock demo: an agent reads a pricing page hiding instructions; the conversation is sealed; sending the SSH key is blocked, planting a memory rule and leaking a token in a URL ask the owner, the disguised retry is blocked, the summary is written." width="100%"></p>
+<p align="center"><img src="docs/images/live-session.gif" alt="A real Hermes session with airlock: asked to summarize a pricing page and post the summary to a webhook, the agent reads the page (which hides instructions for AI assistants); the webhook post stops at Hermes's approval menu with airlock's reason; the owner denies it; the agent delivers the summary, sends nothing and flags the injection." width="100%"></p>
 
-<p align="center"><sub><code>hermes airlock demo</code> in the official Hermes Docker image. Run it on your own install: it plays the attack against your policy and executes nothing.</sub></p>
+<p align="center"><sub>A real session, recorded, not simulated: Hermes Agent v0.22.2, airlock, <code>claude-haiku-5-5</code>. The
+<a href="docs/images/src/session/pricing.html">pricing page</a> hides a note for AI assistants. Once the agent has read
+it, the post to the webhook waits at Hermes's own approval menu; the owner picks Deny.</sub></p>
 
 ## What it does
 
@@ -51,6 +53,13 @@ is in force; `/plugins` in a session lists the plugins loaded.
 
 Try it without risk first: put `mode: observe` in `~/.hermes/airlock.yaml`. airlock then never interferes and only
 writes what it would have done to its journal (`hermes airlock log`).
+
+## Try it without a model
+
+`hermes airlock demo` plays a prompt-injection attempt against the policy in force on your machine. Nothing is
+executed, journaled or tainted.
+
+<p align="center"><img src="docs/images/demo.gif" alt="hermes airlock demo: an agent reads a pricing page hiding instructions; the conversation is sealed; sending the SSH key is blocked, planting a memory rule and leaking a token in a URL ask the owner, the disguised retry is blocked, the summary is written." width="100%"></p>
 
 ## How it decides
 

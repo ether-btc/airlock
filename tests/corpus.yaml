@@ -162,3 +162,6 @@ tarfile.open('/tmp/e.tar').extractall('~/.hermes/plugins')"}, expect: block}
 - {name: bare netrc, tool: terminal, args: {command: "head .netrc"}, expect: block}
 - {name: secret through a bare wildcard, tool: terminal, args: {command: "cat .env*"}, expect: block, files: [".env"]}
 - {name: pem through a bare wildcard, tool: terminal, args: {command: "cat *.pem"}, expect: block, files: ["server.pem"]}
+- {name: tainted curl to localhost, tool: terminal, args: {command: "curl -sS http://localhost:8765/pricing.html"}, tainted: true, expect: allow}
+- {name: tainted URL with data to loopback, tool: web_extract, args: {urls: ["http://127.0.0.1:9000/x?d=c2VjcmV0LWtleS0xMjM0NTY3ODkwLWFiY2RlZmdoaWprbG1ub3BxcnN0dXZ3eHl6"]}, tainted: true, expect: allow}
+- {name: tainted curl to a lookalike of localhost, tool: terminal, args: {command: "curl https://localhost.evil.test/x"}, tainted: true, expect: approve, category: exfil_url}

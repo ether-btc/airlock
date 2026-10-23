@@ -193,6 +193,37 @@ async function demoGif(page) {
   return gif;
 }
 
+// --- Live session GIF (a real Hermes session, recorded by session/record.py, framed by session/cast_frames.py) -----
+async function liveGif(page) {
+  const src = path.join(__dirname, 'session', 'frames.json');
+  if (!fs.existsSync(src)) return null;
+  const { frames } = JSON.parse(fs.readFileSync(src, 'utf8'));
+  const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'airlock-live-'));
+  const list = [];
+  for (let f = 0; f < frames.length; f++) {
+    const [body, secs] = frames[f];
+    await page.setContent(`<!doctype html><html><head><meta charset="utf-8">${FONTS}<style>
+body{margin:0;background:transparent}${TERM_CSS}
+pre{font:400 13px/1.42 'JetBrains Mono',monospace;color:${C.paper};white-space:pre;padding:14px 18px}</style></head><body>
+<div class="term" style="width:${Math.ceil(110 * 7.85 + 36)}px"><div class="bar"><i></i><i></i><i></i>
+<b>Live session · ${esc(VERSION)} with airlock · claude-haiku-5-5 · recorded, not simulated</b></div><pre>${body}</pre></div></body></html>`);
+    await page.evaluate(() => document.fonts.ready);
+    const file = path.join(dir, `f${String(f).padStart(4, '0')}.png`);
+    await page.locator('.term').screenshot({ path: file });
+    list.push(`file '${file}'\nduration ${secs}`);
+  }
+  list.push(`file '${path.join(dir, `f${String(frames.length - 1).padStart(4, '0')}.png`)}'`);
+  fs.writeFileSync(path.join(dir, 'list.txt'), list.join('\n'));
+  const pal = path.join(dir, 'pal.png');
+  const gif = path.join(OUT, 'live-session.gif');
+  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', path.join(dir, 'list.txt'),
+    '-vf', 'scale=960:-1:flags=lanczos,palettegen=max_colors=96:stats_mode=diff', pal]);
+  execFileSync('ffmpeg', ['-y', '-loglevel', 'error', '-f', 'concat', '-safe', '0', '-i', path.join(dir, 'list.txt'),
+    '-i', pal, '-lavfi', 'scale=960:-1:flags=lanczos[x];[x][1:v]paletteuse=dither=none:diff_mode=rectangle', gif]);
+  fs.rmSync(dir, { recursive: true, force: true });
+  return gif;
+}
+
 (async () => {
   const browser = await chromium.launch();
   const shot = async (html, file, viewport, selector = 'body', scale = 2) => {
@@ -211,5 +242,7 @@ async function demoGif(page) {
     { width: 1100, height: 800 }, '.term');
   const page = await browser.newPage({ deviceScaleFactor: 1, viewport: { width: 1100, height: 800 } });
   console.log(path.relative(path.resolve(OUT, '..', '..'), await demoGif(page)));
+  const live = await liveGif(page);
+  if (live) console.log(path.relative(path.resolve(OUT, '..', '..'), live));
   await browser.close();
 })();

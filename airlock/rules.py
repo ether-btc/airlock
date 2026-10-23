@@ -96,9 +96,38 @@ def _texts(value):
             yield from _texts(v)
 
 
+LOOPBACK = {"localhost", "127.0.0.1", "::1", "0.0.0.0"}
+
+
 def _domain_trusted(url, pol):
     host = (urlparse(url).hostname or "").lower()
     return bool(host) and any(host == d or host.endswith("." + d) for d in pol.trusted_domains)
+
+
+def _loopback(url):
+    host = (urlparse(url if "://" in url else "https://" + url).hostname or "").lower()
+    return host in LOOPBACK or host.endswith(".localhost")
+
+
+def failed(result):
+    """True if a tool result says the call failed before reading anything (structured error, nothing returned)."""
+    data = result
+    if isinstance(result, str):
+        try:
+            data = json.loads(result)
+        except ValueError:
+            return False
+    if not isinstance(data, dict):
+        return False
+    if data.get("success") is False or data.get("ok") is False:
+        return True
+    if data.get("error") and not any(data.get(k) for k in ("content", "results", "output", "data", "text", "pages")):
+        return True
+    results = data.get("results")
+    if isinstance(results, list) and results and all(isinstance(x, dict) and x.get("error") and not x.get("content")
+                                                     for x in results):
+        return True
+    return False
 
 
 def _profiles_root(ctx):
@@ -167,7 +196,7 @@ def leading_cd(text, cwd):
 
 def exfil_url(url, pol):
     """True if a URL to an untrusted host could carry data out in its query, path or host name."""
-    if _domain_trusted(url, pol):
+    if _domain_trusted(url, pol) or _loopback(url):
         return False
     parsed = urlparse(url)
     rest = (parsed.path or "") + ("?" + parsed.query if parsed.query else "")
@@ -324,7 +353,7 @@ def categories(pol, tool, args, ctx):
             for t in dict.fromkeys(raw + [shell.unmask(raw[0])] if on == "raw" else
                                    [joined] + [shell.unmask(v) for v in views]):
                 if rx.search(t):
-                    found.append((cat, _describe(rid, rx, t), f"egress.{rid}"))
+                    found.append((cat, _describe(rid, rx, t, cat), f"egress.{rid}"))
                     break
     if pol.persistence_paths:
         hit = None
@@ -351,7 +380,7 @@ def categories(pol, tool, args, ctx):
         if content and SCRIPT_EXT.search(path):
             for rid, cat, rx, _ in pol.egress:
                 if rx.search(content) or rx.search(shell.unmask(content)):
-                    found.append((cat, f"a script that would {_describe(rid, rx, content)}", f"egress.{rid}"))
+                    found.append((cat, f"a script that {_describe(rid, rx, content, cat)}", f"egress.{rid}"))
                     break
     if text and ctx.tainted and ctx.written and tool != "execute_code":
         cwd = leading_cd(text, shell.normalize(args["workdir"], ctx.cwd) if args.get("workdir") else ctx.cwd)
@@ -371,7 +400,8 @@ def categories(pol, tool, args, ctx):
                           "computed_request"))
         if ctx.tainted:
             hosts = [h for h in NET_HOSTS.findall(views)] + URL.findall(text)
-            untrusted = [h for h in hosts if not _domain_trusted(h if "://" in h else "https://" + h, pol)]
+            untrusted = [h for h in hosts if not _domain_trusted(h if "://" in h else "https://" + h, pol)
+                         and not _loopback(h)]
             if NET_COMMAND.search(views) and untrusted and not any(f[0] == "exfil_url" for f in found):
                 host = urlparse(untrusted[0]).hostname if "://" in untrusted[0] else untrusted[0]
                 found.append(("exfil_url", f"network call to {host} after untrusted content (the address can carry "
@@ -389,9 +419,21 @@ def categories(pol, tool, args, ctx):
     return found
 
 
-def _describe(rid, rx, text):
+CATEGORY_PHRASES = {
+    "publish": "publishes outside this machine",
+    "network_write": "sends data over the network",
+    "remote": "acts on another machine",
+    "message": "sends a message",
+    "persistence": "sets something to run or be remembered later",
+    "delegation": "hands work to another agent",
+    "detach": "starts a process that outlives the conversation",
+}
+
+
+def _describe(rid, rx, text, cat=""):
     m = rx.search(text)
-    return re.sub(r"\s+", " ", m.group(0)).strip()[:60] if m else rid
+    snippet = re.sub(r"\s+", " ", m.group(0)).strip()[:60] if m else rid
+    return f"{CATEGORY_PHRASES[cat]} ({snippet})" if cat in CATEGORY_PHRASES else snippet
 
 
 def admitted(pol, tool, origin):

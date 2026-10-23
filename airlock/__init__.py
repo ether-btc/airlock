@@ -336,7 +336,7 @@ def post_tool_call(tool_name="", args=None, result=None, **kwargs):
         args = args if isinstance(args, dict) else {}
         session = session_key(kwargs)
         ctx = _context(pol, kwargs, tool_name)
-        source = rules.taint_source(pol, tool_name, args, ctx)
+        source = None if rules.failed(result) else rules.taint_source(pol, tool_name, args, ctx)
         if source:
             mark(session, source, pol)
         if tool_name in rules.FILE_WRITE_TOOLS:
