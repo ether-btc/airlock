@@ -1,5 +1,11 @@
 # Changelog
 
+## 0.2.1 — 2026-10-24
+
+- Fixed a regular expression that could backtrack exponentially on a crafted command (`dig` followed by many
+  `!==!`-like words), stalling the check of that call. Found by GitHub code scanning (CodeQL `py/redos`). Matching is
+  unchanged; a regression test keeps it under a time bound.
+
 ## 0.2.0 — 2026-10-23
 
 Defenses that catch an injection by its signature, whatever the command looks like:

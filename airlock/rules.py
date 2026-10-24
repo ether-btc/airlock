@@ -32,7 +32,7 @@ SCRIPT_EXT = re.compile(r"\.(sh|bash|zsh|py|pyw|js|mjs|cjs|ts|rb|pl|php|lua|ps1|
 NET_COMMAND = re.compile(r"(^|\n)(curl|wget|http|https|xh|xhs|nc|ncat|netcat|socat|telnet|dig|nslookup|host|drill|"
                          r"ping|ping6|traceroute|tracepath|mtr|whois|ftp|lftp|aria2c|lynx|w3m|links)\b", re.M)
 NET_HOSTS = re.compile(r"(?:^|\n)(?:dig|nslookup|host|drill|ping|ping6|traceroute|tracepath|mtr|whois|nc|ncat|netcat|"
-                       r"telnet)\b(?:\s+-\S+)*(?:\s+\S+=\S+)*\s+@?([A-Za-z0-9.-]+\.[A-Za-z]{2,})", re.M)
+                       r"telnet)\b(?:\s+-\S+)*(?:\s+[^\s=-][^\s=]*=\S*)*\s+@?([A-Za-z0-9.-]+\.[A-Za-z]{2,})", re.M)
 URL_OR_HOST_SUBST = re.compile(r"https?://[^\s\"']*(\$\(|`)|(\$\(|`)[^\s]*\.[A-Za-z]{2,}|"
                                r"\s(-d|--data[\w-]*|-H|--header|-F|--form)\s*([\"'])[^\"']*(\$\(|`)|"
                                r"\s(-d|--data[\w-]*|-H|--header|-F|--form)\s*[^\s\"']*(\$\(|`)")
