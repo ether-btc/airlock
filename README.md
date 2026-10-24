@@ -2,7 +2,7 @@
 
 <p align="center">
   <a href="https://github.com/otsoa-dubief/airlock/actions/workflows/ci.yml"><img src="https://github.com/otsoa-dubief/airlock/actions/workflows/ci.yml/badge.svg" alt="tests"></a>
-  <img src="https://img.shields.io/badge/Hermes%20Agent-%E2%89%A5%200.21.5-0A0E1A" alt="Hermes Agent ≥ 0.21.5">
+  <img src="https://img.shields.io/badge/Hermes%20Agent-%E2%89%A5%200.21.6-0A0E1A" alt="Hermes Agent ≥ 0.21.6">
   <img src="https://img.shields.io/badge/license-Apache--2.0-0A0E1A" alt="Apache-2.0">
   <img src="https://img.shields.io/badge/network-none-0A0E1A" alt="no network">
 </p>
