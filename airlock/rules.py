@@ -714,8 +714,9 @@ def _decide(pol, tool, args, ctx, texts):
                                          ignore=lambda h: _local_host(h, pol))
         if named:
             address, mail = named
+            # A browser page load to that host is a call to it: it counts even when the URL carries no data.
             sends = any(c in OUTBOUND for c, _, _ in found)
-            carries = sends or text or tool == "browser_exec" or any(
+            carries = sends or text or tool in ("browser_exec", "browser_navigate") or any(
                 "?" in u or ("#" in u and "=" in u.split("#", 1)[1]) for u in tool_urls(tool, args))
             if carries:
                 level = "approve" if (mail or not sends or pol.destinations == "approve") else "block"
